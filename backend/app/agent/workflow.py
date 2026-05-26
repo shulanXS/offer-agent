@@ -5,7 +5,7 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from app.core.logging_utils import log_payload
-from app.llm.factory import MockLLMClient, create_llm_client
+from app.llm.factory import MockLLMClient, _looks_like_prompt_template, create_llm_client
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -327,14 +327,23 @@ def build_questions_with_llm(
 4. 结合技术语言和难度等级调整语气。
 4. 不要泄露面试评分细则。
 """
-    payload = client.generate_json(
-        prompt,
-        "你是结构化输出助手，只能返回 JSON。",
-        operation_name="interview_question_generation",
-        trace_id=trace_id,
-    )
-    if not isinstance(payload, dict):
-        logger.warning("Question generation returned non-dict payload: %s", type(payload).__name__)
+    try:
+        payload = client.generate_json(
+            prompt,
+            "你是结构化输出助手，只能返回 JSON，不要输出解释、示例或 Markdown。",
+            operation_name="interview_question_generation",
+            trace_id=trace_id,
+        )
+    except Exception:
+        logger.exception(
+            "[trace_id=%s] Question generation LLM JSON parse failed, fallback using local rules",
+            trace_id or "-",
+        )
+        focus_points = fallback_focus_points
+        questions = adapt_question_difficulty(build_questions(target_role, focus_points), difficulty_level)
+        return focus_points, questions
+    if not isinstance(payload, dict) or _looks_like_prompt_template(payload):
+        logger.warning("Question generation returned invalid or template payload: %s", type(payload).__name__)
         focus_points = fallback_focus_points
         questions = adapt_question_difficulty(build_questions(target_role, focus_points), difficulty_level)
         log_payload(

@@ -12,6 +12,7 @@ backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.ruff_cache/
 backend/.coverage
+backend/logs/
 
 # Node
 frontend/node_modules/

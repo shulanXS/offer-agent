@@ -119,6 +119,10 @@ class ResumeService:
             raise_app_error(404, ErrorCode.RESUME_NOT_FOUND, "简历不存在")
         return resume
 
+    def delete_resume(self, user_id: int, resume_id: str) -> None:
+        if not self.store.delete_resume(user_id, resume_id):
+            raise_app_error(404, ErrorCode.RESUME_NOT_FOUND, "简历不存在")
+
     def _extract_text(self, filename: str, suffix: str, content: bytes, *, trace_id: str) -> str:
         if suffix in {".txt", ".md"}:
             logger.info("[trace_id=%s] Decoding text resume directly: filename=%s", trace_id, filename)
@@ -149,13 +153,22 @@ class ResumeService:
                 trace_id=trace_id,
             )
         except ValueError as exc:
+            message = str(exc)
+            if message in {"empty response", "ANTHROPIC_API_KEY 未配置"} or "ANTHROPIC" in message:
+                logger.exception(
+                    "[trace_id=%s] Resume parse configuration error: provider=%s model=%s",
+                    trace_id,
+                    model_provider or "-",
+                    model_name or "-",
+                )
+                raise_app_error(500, ErrorCode.MODEL_CONFIG_INVALID, f"模型配置错误: {exc}", trace_id=trace_id)
             logger.exception(
-                "[trace_id=%s] Resume parse configuration error: provider=%s model=%s",
+                "[trace_id=%s] Resume parse failed while parsing model JSON: provider=%s model=%s",
                 trace_id,
                 model_provider or "-",
                 model_name or "-",
             )
-            raise_app_error(500, ErrorCode.MODEL_CONFIG_INVALID, f"模型配置错误: {exc}", trace_id=trace_id)
+            raise_app_error(502, ErrorCode.RESUME_PARSE_FAILED, f"简历解析失败: {exc}", trace_id=trace_id)
         except HTTPException:
             raise
         except Exception as exc:

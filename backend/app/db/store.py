@@ -220,6 +220,12 @@ class Store:
             row = conn.execute("SELECT * FROM resumes WHERE id = ? AND user_id = ?", (resume_id, user_id)).fetchone()
         return self._serialize_resume(dict(row)) if row else None
 
+    def delete_resume(self, user_id: int, resume_id: str) -> bool:
+        with get_connection() as conn:
+            cursor = conn.execute("DELETE FROM resumes WHERE id = ? AND user_id = ?", (resume_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def create_message(
         self,
         *,

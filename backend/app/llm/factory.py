@@ -15,6 +15,57 @@ from app.core.logging_utils import log_payload
 logger = logging.getLogger("uvicorn.error")
 
 
+def _looks_like_prompt_template(payload: dict[str, Any]) -> bool:
+    focus_points = payload.get("focus_points")
+    if isinstance(focus_points, list) and any("最多" in str(item) for item in focus_points):
+        return True
+    questions = payload.get("questions")
+    if not isinstance(questions, list) or not questions:
+        return False
+    first = questions[0]
+    if not isinstance(first, dict):
+        return False
+    title = str(first.get("title", "")).strip()
+    prompt = str(first.get("prompt", "")).strip()
+    return title == "题目标题" or prompt == "题目内容"
+
+
+def _score_json_candidate(payload: Any) -> int:
+    if not isinstance(payload, dict):
+        return 0
+    score = 1
+    if _looks_like_prompt_template(payload):
+        return 0
+    focus_points = payload.get("focus_points")
+    if isinstance(focus_points, list) and focus_points:
+        score += 10 + len(focus_points)
+    questions = payload.get("questions")
+    if isinstance(questions, list) and questions:
+        score += 20 + len(questions)
+    if payload.get("personal_info") is not None:
+        score += 15
+    return score
+
+
+def _iter_json_candidates(content: str) -> list[Any]:
+    decoder = json.JSONDecoder()
+    candidates: list[Any] = []
+    idx = 0
+    while idx < len(content):
+        while idx < len(content) and content[idx].isspace():
+            idx += 1
+        if idx >= len(content):
+            break
+        try:
+            payload, end = decoder.raw_decode(content, idx)
+        except json.JSONDecodeError:
+            idx += 1
+            continue
+        candidates.append(payload)
+        idx = end
+    return candidates
+
+
 def _extract_json(text: str) -> Any:
     content = (text or "").strip()
     if not content:
@@ -23,9 +74,20 @@ def _extract_json(text: str) -> Any:
         content = content.split("```json", 1)[1].split("```", 1)[0].strip()
     elif "```" in content:
         content = content.split("```", 1)[1].split("```", 1)[0].strip()
+
+    candidates = _iter_json_candidates(content)
+    if candidates:
+        best = max(candidates, key=_score_json_candidate)
+        if _score_json_candidate(best) > 0:
+            return best
+
     try:
         return json.loads(content)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        if exc.msg == "Extra data":
+            payload, _ = json.JSONDecoder().raw_decode(content)
+            if isinstance(payload, dict) and _score_json_candidate(payload) > 0:
+                return payload
         match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", content)
         if not match:
             raise
@@ -126,8 +188,16 @@ class LangChainLLMClient(LLMClient):
                     text = str(block.get("text", "")).strip()
                     if text:
                         parts.append(text)
+                elif block_type in {"thinking", "reasoning"}:
+                    text = str(block.get("thinking", block.get("text", ""))).strip()
+                    if text:
+                        parts.append(text)
                 elif block_type == "tool_result":
                     text = str(block.get("content", "")).strip()
+                    if text:
+                        parts.append(text)
+                elif block.get("text"):
+                    text = str(block.get("text", "")).strip()
                     if text:
                         parts.append(text)
             return "\n".join(parts).strip()
@@ -199,13 +269,19 @@ def create_llm_client(provider: str | None = None, model_name: str | None = None
     if selected_provider in {"anthropic", "claude", "claude_code"}:
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY 未配置")
-        model = ChatAnthropic(
-            api_key=settings.anthropic_api_key,
-            base_url=settings.anthropic_base_url or None,
-            model=selected_model or "claude-3-5-sonnet-20241022",
-            temperature=0.2,
-            timeout=settings.llm_timeout_seconds,
-        )
+        anthropic_kwargs: dict[str, Any] = {
+            "api_key": settings.anthropic_api_key,
+            "base_url": settings.anthropic_base_url or None,
+            "model": selected_model or "claude-3-5-sonnet-20241022",
+            "temperature": 0.2,
+            "timeout": settings.llm_timeout_seconds,
+            "max_tokens": 4096,
+        }
+        if settings.anthropic_base_url:
+            anthropic_kwargs["default_headers"] = {
+                "Authorization": f"Bearer {settings.anthropic_api_key}",
+            }
+        model = ChatAnthropic(**anthropic_kwargs)
         return LangChainLLMClient("anthropic", selected_model or "claude-3-5-sonnet-20241022", model)
 
     if selected_provider in {"volcengine", "volc", "ark", "huoshan"}:

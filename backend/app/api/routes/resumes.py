@@ -20,6 +20,12 @@ def get_resume(resume_id: str, current_user: dict = Depends(get_current_user)) -
     return resume_service.get_resume(current_user["id"], resume_id)
 
 
+@router.delete("/{resume_id}")
+def delete_resume(resume_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, bool]:
+    resume_service.delete_resume(current_user["id"], resume_id)
+    return {"ok": True}
+
+
 @router.post("/extract", response_model=ResumeExtractResponse)
 async def extract_resume(
     file: UploadFile = File(...),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   activateInterview,
+  deleteResume,
   extractResume,
   finishInterview,
   getMe,
@@ -26,6 +27,7 @@ import {
 import { EvaluationView } from './components/EvaluationView'
 import { InterviewSessionView } from './components/InterviewSessionView'
 import { PreparingStage } from './components/PreparingStage'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { ResumePreviewPanel } from './components/ResumePreviewPanel'
 import type {
   AuthResponse,
@@ -80,6 +82,8 @@ function App() {
   const [isFinishingInterview, setIsFinishingInterview] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState(DEFAULT_NOTICE)
+  const [resumeDeleteTarget, setResumeDeleteTarget] = useState<{ resumeId: string; filename: string } | null>(null)
+  const [isDeletingResume, setIsDeletingResume] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   const hasActiveSession = Boolean(currentSession && currentSession.status === 'active')
@@ -164,12 +168,11 @@ function App() {
       const resumeList = await listResumes(token)
       setUser(profile)
       setSessions(sessionList)
-      setResumes(resumeList.map((item) => ({ ...item, parse_status: 'ready' as const })))
+      const resumeCards = resumeList.map((item) => ({ ...item, parse_status: 'ready' as const }))
+      setResumes(resumeCards)
       setCurrentSession(null)
       setSelectedSessionId('')
-      if (resumeList.length > 0) {
-        setSelectedResumeId((prev) => prev || resumeList[0].id)
-      }
+      setSelectedResumeId((prev) => findReadyResume(resumeCards, prev)?.id ?? '')
       setActiveView('resume-manager')
     } catch (err) {
       handleFatal(err)
@@ -181,6 +184,17 @@ function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void bootstrapAuthState()
   }, [bootstrapAuthState, token])
+
+  useEffect(() => {
+    if (!selectedResumeId) {
+      return
+    }
+    const selected = resumes.find((item) => item.id === selectedResumeId)
+    if (selected?.parse_status === 'ready') {
+      return
+    }
+    setSelectedResumeId(findReadyResume(resumes)?.id ?? '')
+  }, [resumes, selectedResumeId])
 
   useEffect(() => {
     if (!token || !selectedSessionId || !isSessionWorkspace) return
@@ -428,6 +442,62 @@ function App() {
     }
   }
 
+  function clearResumeSnapshot() {
+    setSelectedResumeId('')
+    setResumeFileName('')
+    setResumeText('')
+    setPersonalInfo('')
+    setHighlights(DEFAULT_HIGHLIGHTS)
+    setTechnicalSkills([])
+    setWorkExperience([])
+    setProjectExperience([])
+    setIsResumePreviewOpen(false)
+  }
+
+  function requestResumeDelete(resumeId: string, filename: string) {
+    setResumeDeleteTarget({ resumeId, filename })
+  }
+
+  async function confirmResumeDelete() {
+    if (!resumeDeleteTarget) {
+      return
+    }
+
+    const { resumeId, filename } = resumeDeleteTarget
+    const target = resumes.find((item) => item.id === resumeId)
+    if (target?.parse_status === 'processing' && resumeId.startsWith('temp-')) {
+      setResumes((prev) => prev.filter((item) => item.id !== resumeId))
+      if (selectedResumeId === resumeId) {
+        clearResumeSnapshot()
+      }
+      setResumeDeleteTarget(null)
+      setNotice('已取消上传')
+      return
+    }
+
+    setError('')
+    setIsDeletingResume(true)
+    try {
+      await deleteResume(token, resumeId)
+      const remaining = resumes.filter((item) => item.id !== resumeId)
+      setResumes(remaining)
+      if (selectedResumeId === resumeId) {
+        const nextReady = remaining.find((item) => item.parse_status === 'ready')
+        if (nextReady) {
+          await handleResumeSelect(nextReady.id)
+        } else {
+          clearResumeSnapshot()
+        }
+      }
+      setResumeDeleteTarget(null)
+      setNotice(`已删除简历：${filename}`)
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setIsDeletingResume(false)
+    }
+  }
+
   async function handleResumeSelect(resumeId: string) {
     setSelectedResumeId(resumeId)
     const selected = resumes.find((item) => item.id === resumeId)
@@ -576,7 +646,7 @@ function App() {
     setIsPreparingInterview(false)
     setIsFinishingInterview(false)
     setIsResumePreviewOpen(false)
-    const nextResume = resumes.find((item) => item.id === selectedResumeId) ?? resumes[0] ?? null
+    const nextResume = findReadyResume(resumes, selectedResumeId)
     setSelectedResumeId(nextResume?.id ?? '')
     setLanguage(DEFAULT_LANGUAGE)
     setDifficultyLevel(DEFAULT_DIFFICULTY_LEVEL)
@@ -793,6 +863,14 @@ function App() {
                       key={resume.id}
                       className={`resume-card ${resume.id === selectedResumeId ? 'active' : ''} ${resume.parse_status === 'processing' ? 'processing' : ''}`}
                     >
+                      <button
+                        type="button"
+                        className="resume-card-delete"
+                        aria-label={`删除 ${resume.filename}`}
+                        onClick={() => requestResumeDelete(resume.id, resume.filename)}
+                      >
+                        <TrashIcon />
+                      </button>
                       <div className="resume-card-icon">
                         <span className="resume-badge">{getResumeBadge(resume.filename)}</span>
                       </div>
@@ -857,7 +935,17 @@ function App() {
                   <p className="form-helper">先选择已上传简历，再设置语言、岗位与难度。只有解析完成的简历才能生成题目。</p>
                   <label className="required">
                     选择我的简历
-                    <select value={selectedResumeId} onChange={(event) => void handleResumeSelect(event.target.value)}>
+                    <select
+                      value={selectedResumeReady ? selectedResumeId : ''}
+                      onChange={(event) => {
+                        if (!event.target.value) {
+                          setSelectedResumeId('')
+                          clearResumeSnapshot()
+                          return
+                        }
+                        void handleResumeSelect(event.target.value)
+                      }}
+                    >
                       <option value="">请选择</option>
                       {resumes.map((resume) => (
                         <option key={resume.id} value={resume.id} disabled={resume.parse_status !== 'ready'}>
@@ -880,7 +968,7 @@ function App() {
                       <option value="Java">Java</option>
                       <option value="Python">Python</option>
                       <option value="Go">Go</option>
-                      <option value="TypeScript">TypeScript</option>
+                      <option value="JavaScript">JavaScript</option>
                     </select>
                   </label>
                   <label className="required">
@@ -956,11 +1044,40 @@ function App() {
           </main>
         </div>
       )}
+      <ConfirmDialog
+        open={resumeDeleteTarget !== null}
+        title="删除简历"
+        description={
+          resumeDeleteTarget
+            ? `确定删除「${resumeDeleteTarget.filename}」吗？删除后无法恢复，进行中的面试记录仍会保留当时的简历快照。`
+            : ''
+        }
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        loading={isDeletingResume}
+        onCancel={() => {
+          if (!isDeletingResume) {
+            setResumeDeleteTarget(null)
+          }
+        }}
+        onConfirm={() => void confirmResumeDelete()}
+      />
     </div>
   )
 }
 
 export default App
+
+function findReadyResume(resumes: ResumeCardItem[], preferredId?: string): ResumeCardItem | null {
+  if (preferredId) {
+    const preferred = resumes.find((item) => item.id === preferredId && item.parse_status === 'ready')
+    if (preferred) {
+      return preferred
+    }
+  }
+  return resumes.find((item) => item.parse_status === 'ready') ?? null
+}
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '发生未知错误'
@@ -969,6 +1086,20 @@ function getErrorMessage(error: unknown) {
 function getAvatarText(username?: string | null) {
   const value = (username ?? '').trim()
   return value ? value.slice(0, 1).toUpperCase() : 'U'
+}
+
+function TrashIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M3.5 4.5h9M6 4.5V3.25A.75.75 0 0 1 6.75 2.5h2.5a.75.75 0 0 1 .75.75V4.5M6.25 7v4.25M9.75 7v4.25M4.25 4.5l.5 8.25A1 1 0 0 0 5.75 13.75h4.5a1 1 0 0 0 1-1l.5-8.25"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
 function getResumeBadge(filename: string) {

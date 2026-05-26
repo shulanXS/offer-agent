@@ -20,6 +20,10 @@ class MilvusLiteStore:
     def has_collection(self) -> bool:
         return self._client.has_collection(collection_name=self.collection_name)
 
+    def _ensure_collection_loaded(self) -> None:
+        if self.has_collection():
+            self._client.load_collection(collection_name=self.collection_name)
+
     def rebuild_collection(self, chunks: list[KnowledgeChunk], *, dimension: int) -> None:
         if self.has_collection():
             self._client.drop_collection(collection_name=self.collection_name)
@@ -61,11 +65,12 @@ class MilvusLiteStore:
                     for item in chunks
                 ],
             )
-        self._client.load_collection(collection_name=self.collection_name)
+        self._ensure_collection_loaded()
 
     def search(self, *, query_vector: list[float], role_slug: str, limit: int) -> list[RetrievedChunk]:
         if not self.has_collection():
             return []
+        self._ensure_collection_loaded()
         search_result = self._client.search(
             collection_name=self.collection_name,
             data=[query_vector],

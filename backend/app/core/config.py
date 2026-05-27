@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     llm_model: str = ""
     openai_api_key: str = ""
     openai_base_url: str = ""
+    rag_enabled: bool = False
+    rag_collection_name: str = "role_knowledge"
+    rag_top_k: int = 4
+    rag_embedding_provider: str = "local"
+    rag_embedding_model: str = "hash-embedding-v1"
+    rag_embedding_dimension: int = 256
+    rag_knowledge_dir: str = str(BASE_DIR / "knowledge")
+    milvus_lite_db_path: str = str(DATA_DIR / "milvus_lite.db")
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
     volcengine_api_key: str = ""
@@ -59,6 +67,16 @@ class Settings(BaseSettings):
         return raw if raw.is_absolute() else (BASE_DIR / raw).resolve()
 
     @property
+    def rag_knowledge_path(self) -> Path:
+        raw = Path(self.rag_knowledge_dir)
+        return raw if raw.is_absolute() else (BASE_DIR / raw).resolve()
+
+    @property
+    def milvus_lite_db_file(self) -> Path:
+        raw = Path(self.milvus_lite_db_path)
+        return raw if raw.is_absolute() else (BASE_DIR / raw).resolve()
+
+    @property
     def cors_origins(self) -> list[str]:
         value = self.cors_origins_raw.strip()
         if not value:
@@ -69,3 +87,5 @@ class Settings(BaseSettings):
 settings = Settings()
 settings.database_file.parent.mkdir(parents=True, exist_ok=True)
 settings.log_file.parent.mkdir(parents=True, exist_ok=True)
+settings.rag_knowledge_path.mkdir(parents=True, exist_ok=True)
+settings.milvus_lite_db_file.parent.mkdir(parents=True, exist_ok=True)

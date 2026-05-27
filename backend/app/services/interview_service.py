@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.constants import DEFAULT_JOB_TITLE, InterviewSessionStatus
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.logging_utils import log_payload, new_trace_id
+from app.rag.service import PlanningRAGService
 from app.core.streaming import format_sse, stream_text
 from app.db.store import Store
 
@@ -17,6 +18,7 @@ class InterviewService:
     def __init__(self) -> None:
         self.workflow = CvInterviewWorkflow()
         self.store = Store()
+        self.planning_rag = PlanningRAGService()
 
     def list_sessions(self, user_id: int) -> list[dict[str, Any]]:
         return [self._serialize_summary(item) for item in self.store.list_sessions(user_id)]
@@ -47,6 +49,22 @@ class InterviewService:
             "trace_id": trace_id,
             "model_provider": (payload.get("model_provider") or settings.llm_provider or "").strip(),
             "model_name": (payload.get("model_name") or settings.llm_model or "").strip(),
+        }
+        rag_context = self.planning_rag.retrieve_for_planning(
+            target_role=str(payload.get("target_role", "")),
+            job_title=str(payload.get("job_title", "")),
+            language=str(payload.get("language", "")),
+            difficulty_level=str(payload.get("difficulty_level", "")),
+            technical_skills=[str(item) for item in payload.get("technical_skills", [])],
+            highlights=[str(item) for item in payload.get("highlights", [])],
+            resume_text=str(payload.get("resume_text", "")),
+            trace_id=trace_id,
+        )
+        payload = {
+            **payload,
+            "planning_rag_context": rag_context.context,
+            "planning_rag_focus_points": rag_context.focus_points,
+            "planning_rag_sources": [item.to_log_dict() for item in rag_context.sources],
         }
         logger.info(
             "[trace_id=%s] Interview start requested: provider=%s model=%s resume_id=%s user_id=%s",

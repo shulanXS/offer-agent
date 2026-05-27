@@ -44,6 +44,9 @@ class PlanState(TypedDict, total=False):
     work_experience: list[dict[str, str]]
     project_experience: list[dict[str, str]]
     technical_skills: list[str]
+    planning_rag_context: str
+    planning_rag_focus_points: list[str]
+    planning_rag_sources: list[dict[str, Any]]
     model_provider: str
     model_name: str
     focus_points: list[str]
@@ -107,8 +110,20 @@ def extract_focus_points(resume_text: str, highlights: list[str]) -> list[str]:
     return discovered[:4] or ["项目表达", "技术取舍", "问题排查", "业务理解"]
 
 
+def merge_focus_points(*focus_groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    for focus_group in focus_groups:
+        for item in focus_group:
+            cleaned = str(item).strip()
+            if cleaned and cleaned not in merged:
+                merged.append(cleaned)
+            if len(merged) >= 4:
+                return merged
+    return merged
+
+
 def build_questions(target_role: str, focus_points: list[str]) -> list[InterviewQuestion]:
-    role = target_role or "后端工程师"
+    role = target_role or "后端开发工程师"
     focus = focus_points + ["技术取舍", "稳定性"]
     unique_focus: list[str] = []
     for item in focus:
@@ -246,6 +261,8 @@ def build_questions_with_llm(
     work_experience: list[dict[str, str]],
     project_experience: list[dict[str, str]],
     technical_skills: list[str],
+    planning_rag_context: str,
+    planning_rag_focus_points: list[str],
     language: str,
     difficulty_level: str,
     model_provider: str,
@@ -253,8 +270,12 @@ def build_questions_with_llm(
     trace_id: str = "",
 ) -> tuple[list[str], list[InterviewQuestion]]:
     client = create_llm_client(model_provider, model_name)
+    fallback_focus_points = merge_focus_points(
+        planning_rag_focus_points,
+        extract_focus_points(resume_text, highlights),
+    ) or ["项目表达", "技术取舍", "问题排查", "业务理解"]
     if isinstance(client, MockLLMClient):
-        focus_points = extract_focus_points(resume_text, highlights)
+        focus_points = fallback_focus_points
         questions = adapt_question_difficulty(build_questions(target_role, focus_points), difficulty_level)
         log_payload(
             logger,
@@ -268,7 +289,7 @@ def build_questions_with_llm(
     prompt = f"""
 你是一个教学版 AI 面试系统，请根据简历信息输出 JSON。
 
-目标角色: {target_role or job_title or '后端工程师'}
+目标角色: {target_role or job_title or '后端开发工程师'}
 技术语言: {language or 'Java'}
 难度等级: {difficulty_level or '入门'}
 亮点标签: {highlights}
@@ -278,6 +299,9 @@ def build_questions_with_llm(
 
 项目经历:
 {_format_experience(project_experience)}
+
+岗位知识库摘要:
+{planning_rag_context or '暂无岗位知识库命中，请仅结合岗位名和简历生成题目。'}
 
 简历原文:
 {resume_text}
@@ -311,7 +335,7 @@ def build_questions_with_llm(
     )
     if not isinstance(payload, dict):
         logger.warning("Question generation returned non-dict payload: %s", type(payload).__name__)
-        focus_points = extract_focus_points(resume_text, highlights)
+        focus_points = fallback_focus_points
         questions = adapt_question_difficulty(build_questions(target_role, focus_points), difficulty_level)
         log_payload(
             logger,
@@ -333,24 +357,24 @@ def build_questions_with_llm(
             questions.append(normalized)
     if len(questions) != 4:
         logger.warning("Question generation returned %s usable questions, fallback to deterministic questions", len(questions))
-        fallback_focus_points = focus_points or extract_focus_points(resume_text, highlights)
-        fallback_questions = adapt_question_difficulty(build_questions(target_role, fallback_focus_points), difficulty_level)
+        effective_focus_points = focus_points or fallback_focus_points
+        fallback_questions = adapt_question_difficulty(build_questions(target_role, effective_focus_points), difficulty_level)
         log_payload(
             logger,
             logging.WARNING,
             "Question generation usable question count invalid, fallback questions",
-            {"focus_points": fallback_focus_points, "questions": fallback_questions},
+            {"focus_points": effective_focus_points, "questions": fallback_questions},
             trace_id=trace_id,
         )
-        return fallback_focus_points, fallback_questions
+        return effective_focus_points, fallback_questions
     log_payload(
         logger,
         logging.INFO,
         "Question generation result",
-        {"focus_points": focus_points or extract_focus_points(resume_text, highlights), "questions": questions},
+        {"focus_points": focus_points or fallback_focus_points, "questions": questions},
         trace_id=trace_id,
     )
-    return focus_points or extract_focus_points(resume_text, highlights), questions
+    return focus_points or fallback_focus_points, questions
 
 
 def build_follow_up(question: InterviewQuestion, answer: str) -> str:
@@ -396,6 +420,8 @@ def draft_plan(state: PlanState) -> PlanState:
         work_experience=state.get("work_experience", []),
         project_experience=state.get("project_experience", []),
         technical_skills=state.get("technical_skills", []),
+        planning_rag_context=state.get("planning_rag_context", ""),
+        planning_rag_focus_points=state.get("planning_rag_focus_points", []),
         model_provider=provider,
         model_name=model_name,
         trace_id=trace_id,
@@ -529,7 +555,7 @@ def build_follow_up_with_llm(
     prompt = f"""
 你是一个教学版面试官，请基于候选人的上一轮回答，生成一句自然的追问。
 
-目标角色: {target_role or '后端工程师'}
+目标角色: {target_role or '后端开发工程师'}
 技术语言: {language or 'Java'}
 难度等级: {difficulty_level or '入门'}
 当前题目: {question['prompt']}
@@ -572,7 +598,7 @@ def build_transition_to_next_question_with_llm(
     prompt = f"""
 你是一个教学版面试官，请基于候选人刚刚的回答，生成一句自然的过渡话术，然后切到下一题。
 
-目标角色: {target_role or '后端工程师'}
+目标角色: {target_role or '后端开发工程师'}
 技术语言: {language or 'Java'}
 难度等级: {difficulty_level or '入门'}
 当前题目: {current_question['prompt']}
@@ -675,7 +701,7 @@ def evaluate_with_llm(
     prompt = f"""
 你是一个教学版面试总结助手，请基于下面的问答记录，输出 JSON。
 
-目标角色: {target_role or '后端工程师'}
+目标角色: {target_role or '后端开发工程师'}
 面试记录:
 {_format_threads(question_threads)}
 
@@ -751,6 +777,9 @@ class CvInterviewWorkflow:
                 "work_experience": payload.get("work_experience", []),
                 "project_experience": payload.get("project_experience", []),
                 "technical_skills": payload.get("technical_skills", []),
+                "planning_rag_context": payload.get("planning_rag_context", ""),
+                "planning_rag_focus_points": payload.get("planning_rag_focus_points", []),
+                "planning_rag_sources": payload.get("planning_rag_sources", []),
                 "model_provider": payload.get("model_provider", ""),
                 "model_name": payload.get("model_name", ""),
             }
@@ -766,6 +795,9 @@ class CvInterviewWorkflow:
             "difficulty_level": payload.get("difficulty_level", ""),
             "model_provider": payload.get("model_provider", ""),
             "model_name": payload.get("model_name", ""),
+            "planning_rag_context": payload.get("planning_rag_context", ""),
+            "planning_rag_focus_points": payload.get("planning_rag_focus_points", []),
+            "planning_rag_sources": payload.get("planning_rag_sources", []),
             "question_threads": [
                 {
                     "question_id": opening["id"],

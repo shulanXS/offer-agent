@@ -14,7 +14,15 @@ import {
   startInterviewStream,
 } from './api'
 import './App.css'
-import { DEFAULT_DIFFICULTY_LEVEL, DEFAULT_HIGHLIGHTS, DEFAULT_JOB_TITLE, DEFAULT_LANGUAGE, DEFAULT_NOTICE, SESSION_STATUS_LABELS } from './constants'
+import {
+  DEFAULT_DIFFICULTY_LEVEL,
+  DEFAULT_HIGHLIGHTS,
+  DEFAULT_JOB_TITLE,
+  DEFAULT_LANGUAGE,
+  DEFAULT_NOTICE,
+  INTERVIEW_ROLE_OPTIONS,
+  SESSION_STATUS_LABELS,
+} from './constants'
 import { EvaluationView } from './components/EvaluationView'
 import { InterviewSessionView } from './components/InterviewSessionView'
 import { PreparingStage } from './components/PreparingStage'
@@ -877,7 +885,13 @@ function App() {
                   </label>
                   <label className="required">
                     岗位名称
-                    <input value={jobTitle} onChange={(event) => setJobTitle(event.target.value)} placeholder="请选择" />
+                    <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
+                      {INTERVIEW_ROLE_OPTIONS.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label>
                     难度等级

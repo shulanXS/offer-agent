@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-DEFAULT_JOB_TITLE = "后端工程师"
+DEFAULT_JOB_TITLE = "后端开发工程师"
 DEFAULT_LANGUAGE = "Java"
 DEFAULT_DIFFICULTY_LEVEL = "入门"
 

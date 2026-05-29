@@ -742,7 +742,7 @@ function App() {
         <section className="auth-shell">
           <div className="auth-card">
             <p className="eyebrow">Offer Agent</p>
-            <h1>教学版 CV 面试工作台</h1>
+            <h1>面试 Agent 工作台</h1>
             <p className="auth-copy">前后端分离、JWT 登录、额度计数、SSE 流式交互，以及可恢复的面试会话。</p>
             <div className="segmented">
               <button className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')}>
@@ -934,7 +934,7 @@ function App() {
                   <h3>开始新的模拟面试</h3>
                   <p className="form-helper">先选择已上传简历，再设置语言、岗位与难度。只有解析完成的简历才能生成题目。</p>
                   <label className="required">
-                    选择我的简历
+                    <span className="field-label">选择我的简历</span>
                     <select
                       value={selectedResumeReady ? selectedResumeId : ''}
                       onChange={(event) => {
@@ -963,7 +963,7 @@ function App() {
                     <p className="form-tips">请先从左侧“简历管理”页上传或选择一份简历。</p>
                   )}
                   <label className="required">
-                    语言
+                    <span className="field-label">语言</span>
                     <select value={language} onChange={(event) => setLanguage(event.target.value)}>
                       <option value="Java">Java</option>
                       <option value="Python">Python</option>
@@ -972,7 +972,7 @@ function App() {
                     </select>
                   </label>
                   <label className="required">
-                    岗位名称
+                    <span className="field-label">岗位名称</span>
                     <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
                       {INTERVIEW_ROLE_OPTIONS.map((role) => (
                         <option key={role} value={role}>

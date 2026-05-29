@@ -5,10 +5,47 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from app.core.logging_utils import log_payload
-from app.llm.factory import MockLLMClient, _looks_like_prompt_template, create_llm_client
+from app.llm.factory import MockLLMClient, _looks_like_prompt_template, create_llm_client, extract_spoken_message
 
 
 logger = logging.getLogger("uvicorn.error")
+
+_SPOKEN_JSON_SYSTEM_PROMPT = "你是结构化输出助手，只能返回 JSON，不要输出解释、示例或 Markdown。"
+
+
+def _spoken_message_from_llm(
+    client: Any,
+    *,
+    prompt: str,
+    operation_name: str,
+    trace_id: str,
+    fallback: str,
+) -> str:
+    try:
+        payload = client.generate_json(
+            prompt,
+            _SPOKEN_JSON_SYSTEM_PROMPT,
+            operation_name=operation_name,
+            trace_id=trace_id,
+        )
+    except Exception:
+        logger.exception(
+            "[trace_id=%s] %s JSON parse failed, using rule fallback",
+            trace_id or "-",
+            operation_name,
+        )
+        return fallback
+
+    text = extract_spoken_message(payload)
+    if text:
+        return text
+
+    logger.warning(
+        "[trace_id=%s] %s returned invalid spoken payload, using rule fallback",
+        trace_id or "-",
+        operation_name,
+    )
+    return fallback
 
 
 class InterviewQuestion(TypedDict):
@@ -572,17 +609,23 @@ def build_follow_up_with_llm(
 上一轮回答: {answer}
 追问方向提示: {question['follow_up_hint']}
 
+请返回 JSON，格式如下：
+{{
+  "message": "一句可直接说给候选人听的追问"
+}}
+
 要求：
-1. 输出一段自然中文，不要分点。
-2. 长度控制在 40-90 字。
+1. 只返回 JSON。
+2. message 为 40-90 字自然中文，不要分点。
 3. 聚焦个人贡献、证据、判断依据，不要输出评分结论。
 """
-    text = client.generate_text(
-        prompt,
-        "你是面试官，只输出追问本身。",
+    text = _spoken_message_from_llm(
+        client,
+        prompt=prompt,
         operation_name="interview_follow_up",
         trace_id=trace_id,
-    ).strip()
+        fallback=build_follow_up(question, answer),
+    )
     if not text:
         raise RuntimeError("大模型返回了空追问")
     log_payload(logger, logging.INFO, "Follow-up generation result", {"message": text}, trace_id=trace_id)
@@ -616,18 +659,24 @@ def build_transition_to_next_question_with_llm(
 下一题标题: {next_question['title']}
 下一题考察重点: {next_question['focus']}
 
+请返回 JSON，格式如下：
+{{
+  "message": "一句可直接说给候选人听的过渡话术"
+}}
+
 要求：
-1. 只输出 1 句自然中文，不要分点。
-2. 长度控制在 28-60 字。
+1. 只返回 JSON。
+2. message 为 28-60 字自然中文，不要分点。
 3. 先简短接住候选人的回答，再自然转到下一题方向。
 4. 不要直接复述下一题完整题干。
 """
-    text = client.generate_text(
-        prompt,
-        "你是面试官，只输出承接话术本身。",
+    text = _spoken_message_from_llm(
+        client,
+        prompt=prompt,
         operation_name="interview_transition",
         trace_id=trace_id,
-    ).strip()
+        fallback=build_transition_to_next_question(current_question, next_question, answer),
+    )
     if not text:
         raise RuntimeError("大模型返回了空承接话术")
     log_payload(logger, logging.INFO, "Transition generation result", {"message": text}, trace_id=trace_id)

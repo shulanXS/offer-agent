@@ -10,19 +10,11 @@
 
 ## 索引方式
 
-1. 安装依赖：
+RAG 环境变量说明见 [../RAG_README.md](../RAG_README.md)。
 
-```bash
-pip install -r requirements.txt
-```
-
-2. 构建 Milvus Lite 索引：
-
-```bash
-python3 scripts/index_role_knowledge.py
-```
-
-3. 打开 `.env` 中的 `RAG_ENABLED=true`
+1. 安装依赖：`pip install -r requirements.txt`
+2. 构建索引：`python3 scripts/index_role_knowledge.py`
+3. 设置 `RAG_ENABLED=true` 并重启后端
 
 ## 文档约定
 

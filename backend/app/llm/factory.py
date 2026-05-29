@@ -14,6 +14,159 @@ from app.core.logging_utils import log_payload
 
 logger = logging.getLogger("uvicorn.error")
 
+_REASONING_MARKERS = (
+    "让我分析一下",
+    "用户要求我",
+    "我需要生成",
+    "让我写一个自然的追问",
+    "让我思考一下",
+    "最终版本",
+    "追问方向提示",
+    "字数：",
+    "符合要求",
+    "上一轮回答",
+)
+
+_SPOKEN_OUTPUT_MARKERS = (
+    "最终版本：",
+    "最终版本:",
+    "让我写一个自然的追问：",
+    "让我写一个自然的追问:",
+    "比如：",
+    "比如:",
+    "例如：",
+    "例如:",
+)
+
+_META_LINE_PATTERNS = (
+    re.compile(r"^用户要求"),
+    re.compile(r"^让我分析"),
+    re.compile(r"^我需要"),
+    re.compile(r"^考虑到"),
+    re.compile(r"^由于题目"),
+    re.compile(r"^要求[：:]"),
+    re.compile(r"^追问方向"),
+    re.compile(r"^上一轮回答"),
+    re.compile(r"^这个追问"),
+    re.compile(r"^或者可以"),
+    re.compile(r"^让我再调整"),
+    re.compile(r"^让我数一下"),
+    re.compile(r"字数"),
+    re.compile(r"符合要求"),
+    re.compile(r"^可以追问"),
+    re.compile(r"^我觉得"),
+    re.compile(r"^我会问"),
+    re.compile(r"^我选择"),
+    re.compile(r"^- "),
+    re.compile(r"^\d+\.\s"),
+)
+
+_SPOKEN_JSON_KEYS = ("message", "follow_up", "transition", "text")
+
+
+def _looks_like_reasoning_output(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if any(marker in stripped for marker in _REASONING_MARKERS):
+        return True
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    bullet_count = sum(1 for line in lines if line.startswith("- "))
+    return bullet_count >= 3 and len(lines) >= 5
+
+
+def _strip_wrapping_quotes(text: str) -> str:
+    text = text.strip()
+    for open_quote, close_quote in (('"', '"'), ("“", "”"), ("'", "'"), ("「", "」")):
+        if text.startswith(open_quote) and text.endswith(close_quote) and len(text) > 2:
+            return text[len(open_quote) : -len(close_quote)].strip()
+    return text
+
+
+def _is_meta_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return True
+    return any(pattern.search(stripped) for pattern in _META_LINE_PATTERNS)
+
+
+def _collect_spoken_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+
+    for match in re.finditer(r'["“]([^"”]{12,})["”]', text):
+        part = match.group(1).strip()
+        if part and not _is_meta_line(part):
+            candidates.append(part)
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        for segment in re.split(r'["”\'」]\s+(?=[\u4e00-\u9fff好的您你请])', line):
+            segment = _strip_wrapping_quotes(segment.strip())
+            if not segment:
+                continue
+            for part in re.split(r"(?<=[。！？?])\s+", segment):
+                part = _strip_wrapping_quotes(part.strip())
+                if part and not _is_meta_line(part) and len(part) >= 12:
+                    candidates.append(part)
+
+    if candidates:
+        return candidates
+
+    cleaned = _strip_wrapping_quotes(re.sub(r"\s+", " ", text).strip())
+    for part in re.split(r"(?<=[。！？?])\s+", cleaned):
+        part = _strip_wrapping_quotes(part.strip())
+        if part and not _is_meta_line(part) and len(part) >= 12:
+            candidates.append(part)
+    return candidates
+
+
+def _pick_best_spoken_line(candidates: list[str]) -> str:
+    if not candidates:
+        return ""
+
+    def score_line(line: str) -> int:
+        value = 0
+        if "？" in line or line.endswith("?") or "吗" in line:
+            value += 3
+        if any(token in line for token in ("你", "您", "请", "能否", "可以", "好的")):
+            value += 2
+        if _is_meta_line(line):
+            value -= 10
+        return value
+
+    best_score = max(score_line(line) for line in candidates)
+    best_lines = [line for line in candidates if score_line(line) == best_score]
+    for line in reversed(candidates):
+        if line in best_lines:
+            return line
+    return candidates[-1]
+
+
+def extract_spoken_response(text: str) -> str:
+    content = (text or "").strip()
+    if not content or not _looks_like_reasoning_output(content):
+        return content
+
+    for marker in _SPOKEN_OUTPUT_MARKERS:
+        if marker in content:
+            tail = content.rsplit(marker, 1)[-1].strip()
+            candidate = _pick_best_spoken_line(_collect_spoken_candidates(tail))
+            if candidate:
+                return candidate
+
+    candidate = _pick_best_spoken_line(_collect_spoken_candidates(content))
+    return candidate or content
+
+
+def extract_spoken_message(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in _SPOKEN_JSON_KEYS:
+        text = extract_spoken_response(str(payload.get(key) or "").strip())
+        if text:
+            return text
+    return ""
+
 
 def _looks_like_prompt_template(payload: dict[str, Any]) -> bool:
     focus_points = payload.get("focus_points")
@@ -44,6 +197,11 @@ def _score_json_candidate(payload: Any) -> int:
         score += 20 + len(questions)
     if payload.get("personal_info") is not None:
         score += 15
+    for key in _SPOKEN_JSON_KEYS:
+        message = payload.get(key)
+        if isinstance(message, str) and message.strip():
+            score += 40 + min(len(message.strip()), 200)
+            break
     return score
 
 
@@ -189,9 +347,7 @@ class LangChainLLMClient(LLMClient):
                     if text:
                         parts.append(text)
                 elif block_type in {"thinking", "reasoning"}:
-                    text = str(block.get("thinking", block.get("text", ""))).strip()
-                    if text:
-                        parts.append(text)
+                    continue
                 elif block_type == "tool_result":
                     text = str(block.get("content", "")).strip()
                     if text:
@@ -236,7 +392,16 @@ class LangChainLLMClient(LLMClient):
                 operation_name,
             )
             raise
-        text = self._normalize_content(getattr(response, "content", response))
+        raw_text = self._normalize_content(getattr(response, "content", response))
+        text = extract_spoken_response(raw_text)
+        if text != raw_text:
+            log_payload(
+                logger,
+                logging.INFO,
+                f"LLM spoken response extracted: provider={self.provider_name} model={self.model_name} operation={operation_name}",
+                {"raw": raw_text, "extracted": text},
+                trace_id=trace_id,
+            )
         log_payload(
             logger,
             logging.INFO,

@@ -302,22 +302,6 @@ class LLMClient(ABC):
         return payload
 
 
-class MockLLMClient(LLMClient):
-    def __init__(self, model_name: str = "mock") -> None:
-        self.provider_name = "mock"
-        self.model_name = model_name
-
-    def generate_text(
-        self,
-        prompt: str,
-        system_prompt: str | None = None,
-        *,
-        operation_name: str = "generic",
-        trace_id: str = "",
-    ) -> str:
-        raise RuntimeError("mock client should not be called directly")
-
-
 class LangChainLLMClient(LLMClient):
     def __init__(self, provider_name: str, model_name: str, model: Any) -> None:
         self.provider_name = provider_name
@@ -413,11 +397,13 @@ class LangChainLLMClient(LLMClient):
 
 
 def create_llm_client(provider: str | None = None, model_name: str | None = None) -> LLMClient:
-    selected_provider = (provider or settings.llm_provider or "mock").strip().lower()
+    selected_provider = (provider or settings.llm_provider or "").strip().lower()
     selected_model = (model_name or settings.llm_model or "").strip()
 
-    if selected_provider in {"mock", ""}:
-        return MockLLMClient(selected_model or "mock")
+    if selected_provider == "mock":
+        raise ValueError("LLM_PROVIDER=mock 已废弃，请配置 openai、anthropic 或 volcengine")
+    if not selected_provider:
+        raise ValueError("LLM_PROVIDER 未配置")
 
     if selected_provider in {"openai"}:
         if not settings.openai_api_key:

@@ -4,7 +4,9 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.auth import router as auth_router
+from app.api.routes.interview_options import router as interview_options_router
 from app.api.routes.interviews import router as interviews_router
+from app.api.routes.learning import router as learning_router
 from app.api.routes.resumes import router as resumes_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
@@ -26,7 +28,9 @@ app.add_middleware(
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
+api_router.include_router(interview_options_router)
 api_router.include_router(interviews_router)
+api_router.include_router(learning_router)
 api_router.include_router(resumes_router)
 app.include_router(api_router)
 

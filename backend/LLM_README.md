@@ -16,7 +16,6 @@
 
 | 值 | 说明 |
 |----|------|
-| `mock` | 本地规则，不调用真实模型（适合离线调试） |
 | `openai` | OpenAI 或 OpenAI 兼容网关 |
 | `anthropic` | Claude / Anthropic 或兼容网关（`claude`、`claude_code` 同此路径） |
 | `volcengine` | 火山方舟 / 豆包（`ark`、`volc`、`huoshan` 同此路径） |
@@ -69,6 +68,7 @@ VOLCENGINE_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 
 ## 注意事项
 
-- 未配置对应 Key 时，调用真实模型会直接报错（`mock` 除外）。
+- 未配置 `LLM_PROVIDER` 或对应 Key 时，调用会直接报错。
+- LLM 调用失败时，面试 Agent / Planning / Evaluation 会分别走**规则降级**或**模板降级**（见各模块 `rule_fallback` / `build_template_fallback_*`），简历解析会退回规则抽取。
 - 修改 `.env` 后须重启后端进程。
 - LLM 配置与 RAG 向量配置相互独立，详见 [RAG_README.md](./RAG_README.md)。

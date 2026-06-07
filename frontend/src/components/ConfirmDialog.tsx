@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 type ConfirmDialogProps = {
   open: boolean
@@ -34,15 +35,14 @@ export function ConfirmDialog({
       }
     }
 
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
 
     return () => {
-      document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [loading, onCancel, open])
+
+  useBodyScrollLock(open)
 
   if (!open) {
     return null
@@ -52,10 +52,12 @@ export function ConfirmDialog({
     <div className="confirm-dialog-root" role="presentation">
       <button type="button" className="confirm-dialog-backdrop" aria-label="关闭" disabled={loading} onClick={onCancel} />
       <div className="confirm-dialog-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-desc">
-        <div className="confirm-dialog-icon" aria-hidden="true">
-          {danger ? <WarningIcon /> : <InfoIcon />}
+        <div className="confirm-dialog-header">
+          <div className={`confirm-dialog-icon${danger ? ' danger' : ''}`} aria-hidden="true">
+            {danger ? <WarningIcon /> : <InfoIcon />}
+          </div>
+          <h3 id="confirm-dialog-title">{title}</h3>
         </div>
-        <h3 id="confirm-dialog-title">{title}</h3>
         <p id="confirm-dialog-desc">{description}</p>
         <div className="confirm-dialog-actions">
           <button type="button" className="ghost" disabled={loading} onClick={onCancel}>

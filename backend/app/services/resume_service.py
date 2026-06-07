@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.logging_utils import log_payload, new_trace_id
 from app.db.store import Store
-from app.llm.factory import MockLLMClient, create_llm_client
+from app.llm.factory import create_llm_client
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -66,7 +66,7 @@ class ResumeService:
             )
             raise_app_error(400, ErrorCode.RESUME_TEXT_TOO_SHORT, "简历内容过短，无法解析", trace_id=trace_id)
 
-        resolved_provider = (model_provider or settings.llm_provider or "mock").strip()
+        resolved_provider = (model_provider or settings.llm_provider or "").strip()
         resolved_model_name = (model_name or settings.llm_model or "").strip()
         logger.info(
             "[trace_id=%s] Resume parse requested: provider=%s model=%s filename=%s user_id=%s",
@@ -76,13 +76,6 @@ class ResumeService:
             file.filename or "resume",
             user_id,
         )
-        if resolved_provider == "mock":
-            logger.warning(
-                "[trace_id=%s] Resume parse is using mock mode: filename=%s user_id=%s",
-                trace_id,
-                file.filename or "resume",
-                user_id,
-            )
         parsed = self._parse_resume_text(
             resume_text,
             model_provider=resolved_provider,
@@ -92,13 +85,13 @@ class ResumeService:
         log_payload(
             logger,
             logging.INFO,
-            f"Resume structured summary: filename={file.filename or 'resume'} provider={resolved_provider or 'mock'}",
+            f"Resume structured summary: filename={file.filename or 'resume'} provider={resolved_provider or '-'}",
             parsed,
             trace_id=trace_id,
         )
         parsed["filename"] = file.filename or "resume"
         parsed["resume_text"] = resume_text
-        parsed["model_provider"] = resolved_provider or "mock"
+        parsed["model_provider"] = resolved_provider
         parsed["model_name"] = resolved_model_name
         saved = self.store.create_resume(user_id=user_id, filename=parsed["filename"], payload=parsed)
         log_payload(
@@ -182,10 +175,6 @@ class ResumeService:
 
     def _parse_with_llm(self, resume_text: str, *, model_provider: str, model_name: str, trace_id: str) -> dict[str, Any]:
         client = create_llm_client(model_provider, model_name)
-        if isinstance(client, MockLLMClient):
-            parsed = self._parse_with_rules(resume_text)
-            log_payload(logger, logging.INFO, "Resume parsed with local rules", parsed, trace_id=trace_id)
-            return parsed
         prompt = f"""
 你是一个教学版简历解析助手，请从下面简历中抽取结构化信息，并返回 JSON。
 
@@ -207,21 +196,36 @@ class ResumeService:
 3. 缺失字段返回空数组或空字符串。
 4. 不要过度润色，保持教学版简洁风格。
 """
-        payload = client.generate_json(
-            prompt,
-            "你是结构化输出助手，只能返回 JSON。",
-            operation_name="resume_parse",
-            trace_id=trace_id,
-        )
-        normalized = {
-            "personal_info": str(payload.get("personal_info", "")).strip(),
-            "highlights": self._to_clean_list(payload.get("highlights", []), limit=8),
-            "technical_skills": self._to_clean_list(payload.get("technical_skills", []), limit=8),
-            "work_experience": self._normalize_entries(payload.get("work_experience", [])),
-            "project_experience": self._normalize_entries(payload.get("project_experience", [])),
-        }
-        log_payload(logger, logging.INFO, "Resume parsed with LLM and normalized", normalized, trace_id=trace_id)
-        return normalized
+        try:
+            payload = client.generate_json(
+                prompt,
+                "你是结构化输出助手，只能返回 JSON。",
+                operation_name="resume_parse",
+                trace_id=trace_id,
+            )
+            normalized = {
+                "personal_info": str(payload.get("personal_info", "")).strip(),
+                "highlights": self._to_clean_list(payload.get("highlights", []), limit=8),
+                "technical_skills": self._to_clean_list(payload.get("technical_skills", []), limit=8),
+                "work_experience": self._normalize_entries(payload.get("work_experience", [])),
+                "project_experience": self._normalize_entries(payload.get("project_experience", [])),
+                "parse_source": "llm",
+                "parse_degraded": False,
+            }
+            log_payload(logger, logging.INFO, "Resume parsed with LLM and normalized", normalized, trace_id=trace_id)
+            return normalized
+        except Exception:
+            logger.exception(
+                "[trace_id=%s] Resume LLM parse failed, using rule fallback: provider=%s model=%s",
+                trace_id,
+                model_provider or "-",
+                model_name or "-",
+            )
+            parsed = self._parse_with_rules(resume_text)
+            parsed["parse_source"] = "rule_fallback"
+            parsed["parse_degraded"] = True
+            log_payload(logger, logging.INFO, "Resume parsed with rule fallback", parsed, trace_id=trace_id)
+            return parsed
 
     def _parse_with_rules(self, resume_text: str) -> dict[str, Any]:
         lines = [line.strip() for line in resume_text.splitlines() if line.strip()]

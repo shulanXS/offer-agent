@@ -6,7 +6,10 @@ DEFAULT_LANGUAGE = "Java"
 DEFAULT_DIFFICULTY_LEVEL = "入门"
 
 
-class InterviewSessionStatus(str, Enum):
-    PREPARING = "preparing"
-    ACTIVE = "active"
-    COMPLETED = "completed"
+class InterviewPlanSessionStatus(str, Enum):
+    PLANNING = "planning"
+    PLAN_READY = "plan_ready"
+    PLAN_CONFIRMED = "plan_confirmed"
+
+
+V2_SESSION_SCHEMA_VERSION = 2

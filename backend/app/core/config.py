@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     jwt_secret: str = "-1cY5cSK5OLORJAJXEvnWPQXHQN8N-HY"
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 720
+    jwt_expire_minutes: int = 10080
     default_interview_quota: int = 5
     database_path: str = str(DATA_DIR / "offer_agent.db")
     log_file_path: str = str(BASE_DIR / "logs" / "offer_agent.log")
@@ -38,8 +38,10 @@ class Settings(BaseSettings):
     cors_origins_raw: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
     stream_chunk_size: int = 10
     stream_delay_ms: int = 25
+    stream_interview_chunk_size: int = 2
+    stream_interview_delay_ms: int = 36
     llm_timeout_seconds: int = 300
-    llm_provider: str = "mock"
+    llm_provider: str = ""
     llm_model: str = ""
     openai_api_key: str = ""
     openai_base_url: str = ""
@@ -55,6 +57,10 @@ class Settings(BaseSettings):
     anthropic_base_url: str = ""
     volcengine_api_key: str = ""
     volcengine_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    interview_context_max_messages: int = 12
+    interview_context_max_chars: int = 4000
+    interview_topic_summary_llm_min_chars: int = 200
+    interview_stale_reply_lock_seconds: int = 300
 
     @property
     def database_file(self) -> Path:

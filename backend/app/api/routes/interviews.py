@@ -1,51 +1,122 @@
+import asyncio
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
-from app.schemas import InterviewSessionDetail, ReplyInterviewRequest, SessionSummary, StartInterviewRequest
-from app.services.interview_service import InterviewService
+from app.core.errors import ErrorCode, raise_app_error
+from app.core.streaming import SSE_RESPONSE_HEADERS
+from app.schemas import ReplyInterviewRequest
+from app.schemas.interview_plan import (
+    CreateInterviewRequest,
+    InterviewPlanPreviewResponse,
+    RegeneratePlanRequest,
+)
+from app.services.interview_planning_service import InterviewPlanningService
+from app.services.interview_agent_service import InterviewAgentService
+from app.services.interview_evaluation_service import InterviewEvaluationService
+from app.schemas.interview_evaluation import EvaluateInterviewResponse
+from app.schemas.interview_session_list import InterviewSessionListItem
+from app.schemas.interview_live import LiveInterviewSessionDetail
+from app.services.interview_session_list_service import InterviewSessionListService
+from app.services.learning.query import get_learning_context_for_session
+from app.schemas.learning import LearningContextResponse
 
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
-service = InterviewService()
+planning_service = InterviewPlanningService()
+interview_agent_service = InterviewAgentService()
+evaluation_service = InterviewEvaluationService()
+session_list_service = InterviewSessionListService()
 
 
-@router.get("", response_model=list[SessionSummary])
+def _require_v2_session(user_id: int, session_id: str) -> None:
+    if not interview_agent_service.is_v2_session(user_id, session_id):
+        raise_app_error(404, ErrorCode.SESSION_NOT_FOUND, "面试会话不存在")
+
+
+@router.post("", response_model=InterviewPlanPreviewResponse)
+def create_interview(request: CreateInterviewRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    return planning_service.create_interview(current_user["id"], request.model_dump())
+
+
+@router.get("", response_model=list[InterviewSessionListItem])
 def list_interviews(current_user: dict = Depends(get_current_user)) -> list[dict]:
-    return service.list_sessions(current_user["id"])
+    return session_list_service.list_v2_sessions(current_user["id"])
 
 
-@router.get("/{session_id}", response_model=InterviewSessionDetail)
+@router.get("/{session_id}")
 def get_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
-    return service.get_session_detail(current_user["id"], session_id)
+    live_detail = interview_agent_service.get_live_session_detail(current_user["id"], session_id)
+    if live_detail:
+        return live_detail
+    planning_detail = planning_service.get_session_detail(current_user["id"], session_id)
+    if planning_detail:
+        return planning_detail
+    raise_app_error(404, ErrorCode.SESSION_NOT_FOUND, "面试会话不存在")
+
+
+@router.post("/{session_id}/plan/generate", response_model=InterviewPlanPreviewResponse)
+def generate_interview_plan(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    return planning_service.generate_plan(current_user["id"], session_id)
+
+
+@router.post("/{session_id}/plan/regenerate", response_model=InterviewPlanPreviewResponse)
+def regenerate_interview_plan(
+    session_id: str,
+    request: RegeneratePlanRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    return planning_service.regenerate_plan(current_user["id"], session_id, request.model_dump())
+
+
+@router.post("/{session_id}/plan/confirm", response_model=InterviewPlanPreviewResponse)
+def confirm_interview_plan(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    return planning_service.confirm_plan(current_user["id"], session_id)
+
+
+@router.post("/{session_id}/evaluate", response_model=EvaluateInterviewResponse)
+def evaluate_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    return evaluation_service.evaluate_interview(current_user["id"], session_id)
 
 
 @router.get("/{session_id}/evaluation")
 def get_evaluation(session_id: str, current_user: dict = Depends(get_current_user)) -> dict | None:
-    return service.get_evaluation(current_user["id"], session_id)
+    if evaluation_service.is_v2_evaluable_session(current_user["id"], session_id):
+        return evaluation_service.get_evaluation(current_user["id"], session_id)
+    return None
 
 
-@router.post("/{session_id}/finish", response_model=InterviewSessionDetail)
+@router.get("/{session_id}/learning-context", response_model=LearningContextResponse)
+def get_learning_context(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    return get_learning_context_for_session(user_id=current_user["id"], session_id=session_id)
+
+
+@router.post("/{session_id}/finish", response_model=LiveInterviewSessionDetail)
 def finish_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
-    return service.finish_interview(current_user["id"], session_id)
+    _require_v2_session(current_user["id"], session_id)
+    return interview_agent_service.finish_interview(current_user["id"], session_id)
 
 
-@router.post("/{session_id}/activate", response_model=InterviewSessionDetail)
+@router.post("/{session_id}/activate", response_model=LiveInterviewSessionDetail)
 def activate_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
-    return service.activate_interview(current_user["id"], session_id)
-
-
-@router.post("/stream")
-async def start_interview_stream(
-    request: StartInterviewRequest, current_user: dict = Depends(get_current_user)
-) -> StreamingResponse:
-    result = service.start_interview(current_user["id"], request.model_dump())
-    return StreamingResponse(service.stream_created_session(result), media_type="text/event-stream")
+    _require_v2_session(current_user["id"], session_id)
+    return interview_agent_service.activate_interview(current_user["id"], session_id)
 
 
 @router.post("/{session_id}/reply/stream")
 async def reply_interview_stream(
     session_id: str, request: ReplyInterviewRequest, current_user: dict = Depends(get_current_user)
 ) -> StreamingResponse:
-    result = service.reply_to_interview(current_user["id"], session_id, request.content)
-    return StreamingResponse(service.stream_reply_result(result), media_type="text/event-stream")
+    _require_v2_session(current_user["id"], session_id)
+    result = await asyncio.to_thread(
+        interview_agent_service.reply_to_interview,
+        current_user["id"],
+        session_id,
+        request.content,
+    )
+    return StreamingResponse(
+        interview_agent_service.stream_reply_result(result),
+        media_type="text/event-stream",
+        headers=SSE_RESPONSE_HEADERS,
+    )

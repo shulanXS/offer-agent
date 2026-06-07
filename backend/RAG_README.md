@@ -1,6 +1,8 @@
 # RAG 配置说明
 
-出题阶段 Planning RAG：从 Milvus Lite 检索岗位知识库，辅助生成更贴合岗位的面试题。
+出题阶段 Planning RAG：从 Milvus Lite 检索岗位知识库，辅助生成更贴合岗位的面试计划。
+
+**作用范围：** Planning（`POST /api/interviews` 及 plan generate/regenerate）在 `RAG_ENABLED=true` 时会注入 `role_knowledge_context`。动态 Interview 与 Evaluation **不使用** RAG。
 
 配置项写在 `backend/.env`，知识文档放在 `backend/knowledge/roles/`。
 

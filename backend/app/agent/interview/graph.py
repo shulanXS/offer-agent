@@ -12,7 +12,11 @@ from app.agent.interview.nodes.ingest import ingest_answer_node
 from app.agent.interview.nodes.merge_working_memory import merge_working_memory_node
 from app.agent.interview.nodes.observe import build_observe_node
 from app.agent.interview.nodes.prepare_repeat_blocked import prepare_repeat_blocked_node
-from app.agent.interview.routing import route_after_boundary, route_after_decide
+from app.agent.interview.routing import (
+    route_after_boundary,
+    route_after_decide,
+    route_after_ingest,
+)
 from app.agent.interview.state import InterviewReplyState
 
 
@@ -30,7 +34,16 @@ _builder.add_node("finalize_advance", finalize_advance_node)
 _builder.add_node("finalize_forced_finish", finalize_forced_finish_node)
 
 _builder.add_edge(START, "ingest_answer")
-_builder.add_edge("ingest_answer", "build_observe")
+# 1.4：ingest 后判定 precheck 命中走 finalize_*。
+_builder.add_conditional_edges(
+    "ingest_answer",
+    route_after_ingest,
+    {
+        "build_observe": "build_observe",
+        "finalize_forced_finish": "finalize_forced_finish",
+        "finalize_advance": "finalize_advance",
+    },
+)
 _builder.add_edge("build_observe", "enforce_boundaries")
 _builder.add_conditional_edges(
     "enforce_boundaries",

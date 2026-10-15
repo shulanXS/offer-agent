@@ -24,5 +24,14 @@
   "request_timeout": "Request timed out, please retry",
   "stream_unsupported": "Your browser does not support streaming",
   "stream_failed": "Streaming request failed",
-  "unauthorized": "Your session has expired, please sign in again"
+  "unauthorized": "Your session has expired, please sign in again",
+  "not_found": "The page you are looking for does not exist.",
+  "back_to_resumes": "Back to Resumes",
+  "back_to_records": "Back to Records",
+  "selling_point_1_title": "Trained on 3,000+ real interviews",
+  "selling_point_1_desc": "Aggregated from FAANG and top Chinese tech firms (2022–2025). Question patterns reflect what real interviewers actually ask.",
+  "selling_point_2_title": "Plan → Execution → Evidence",
+  "selling_point_2_desc": "You see the plan before confirming. Every question is grounded in the plan. Every score is grounded in your words.",
+  "selling_point_3_title": "Verifiable scoring",
+  "selling_point_3_desc": "Each competency score links to the exact quote from your answer. No black-box grades."
 }

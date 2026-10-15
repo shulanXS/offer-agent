@@ -3,11 +3,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.db.store import Store
 from app.services.interview.boundaries import (
     is_wrap_up_zone,
     resolve_display_remaining_seconds,
 )
-from app.services.interview.constants import INTERVIEW_PHASE_TOPIC_QUESTION, MAX_ANSWER_ROUNDS
+from app.services.interview.constants import (
+    INTERVIEW_PHASE_TOPIC_QUESTION,
+    INTERVIEW_WRAP_UP_MINUTES,
+    MAX_ANSWER_ROUNDS,
+)
 from app.services.interview.runtime_state import completed_topic_count, topic_name, total_topic_count
 
 
@@ -29,6 +34,7 @@ def build_progress(
     runtime_state: dict[str, Any],
     session_status: str = "active",
     session_updated_at: str | None = None,
+    is_reply_processing: bool = False,
 ) -> dict[str, Any]:
     current_topic_id = str(runtime_state.get("current_topic_id", ""))
     deadline_at = str(runtime_state.get("deadline_at") or "")
@@ -49,9 +55,10 @@ def build_progress(
         "deadline_at": deadline_at,
         "remaining_seconds": remaining,
         "is_wrap_up_zone": (
-            is_wrap_up_zone(deadline_at) if session_status == "active" and deadline_at else False
+            remaining is not None
+            and remaining <= INTERVIEW_WRAP_UP_MINUTES * 60
         ),
-        "is_reply_processing": bool(runtime_state.get("reply_in_progress")),
+        "is_reply_processing": is_reply_processing,
     }
 
 
@@ -67,11 +74,17 @@ def serialize_live_session_detail(
     status = session_row["status"]
     progress = None
     if status in {"active", "evaluating", "completed"} and runtime_state.get("current_topic_id"):
+        # 1.3：从 session_locks 表读 is_reply_processing。
+        lock_present = (
+            session_row.get("id")
+            and Store().get_session_lock(str(session_row["id"])) is not None
+        )
         progress = build_progress(
             plan_json=plan_json,
             runtime_state=runtime_state,
             session_status=status,
             session_updated_at=str(session_row.get("updated_at") or ""),
+            is_reply_processing=bool(lock_present),
         )
 
     return {

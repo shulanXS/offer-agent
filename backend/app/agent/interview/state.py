@@ -29,6 +29,8 @@ class InterviewReplyState(TypedDict, total=False):
     next_status: str
     # v1.1: 面试语言（en|zh），由 configuration.interview_language 注入
     interview_language: str
+    # v3 1.4：ingest 阶段 precheck 命中硬边界时，service 端应跳过 user_message 写。
+    _skip_user_message: bool
 
 
 def build_interview_reply_state(

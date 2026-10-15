@@ -33,7 +33,7 @@ flowchart TD
 
 ## 4. 硬边界究竟怎样判断
 
-当前常量为：45 分钟、最后 5 分钟进入收尾区、总回答最多 12 轮、单主题最多 3 轮回答、最多 2 次追问。检查优先级是：到期 → 总轮数 → 收尾区 → 单主题轮数 → 追问次数。
+v1 阶段常量写死为 45 分钟。**v2.2 起**改为读 `session.configuration.duration_minutes`（15/30/45/60 之一），由 `ensure_interview_clock_started` 注入 deadline；其他约束保持：最后 5 分钟进入收尾区、总回答最多 12 轮、单主题最多 3 轮回答、最多 2 次追问。检查优先级是：到期 → 总轮数 → 收尾区 → 单主题轮数 → 追问次数。
 
 优先级有实际含义：已经到期时，不应因为仍有未问主题而继续；在收尾区则根据必考覆盖和是否还有主题决定结束或切题。这里 required_topics_covered 使用 completed_topic_ids；它代表流程完成记录，不是证据层全部信号都已验证。
 
@@ -76,6 +76,19 @@ Decide 的上下文有消息数量和字符数限制。当前裁剪是移除最�
 正常追问可能串行包含抽取、Decide 和 Act；切题时还涉及摘要、过渡等处理。应记录分阶段耗时，再决定减少调用、压缩输入、使用不同模型或异步补充证据。把抽取和决策随意并行会使决策读不到新证据，改变业务语义。
 
 优化前应保持一组固定回答与期望信号，比较追问质量和报告覆盖。只比较总耗时容易以质量下降换来表面提速。
+
+## 10. v2.2：算法回合
+
+当 `configuration.include_algorithm=true` 时，live page 头部出现"Algorithm Round"按钮；点击打开右侧 side panel，内嵌 `AlgorithmTurn` 组件。
+
+算法回合不进入主对话流（**不**写 messages 表），仅作为本场内的辅助手写环节：
+
+- 题库来自 `backend/app/data/algorithm_problems.py`（5 道经典题：two_sum / reverse_linked_list / valid_parentheses / max_subarray / lru_cache），含隐藏测试用例
+- LLM judge 强约束 JSON-only 输出；解析失败回 `verdict=unparsed`，前端展示"暂时无法解析"提示而非 5xx
+- 评分维度 correctness / efficiency / style / edge_cases（各 1-5）+ 整体 overall + 1-2 句 feedback
+- 用户可重置 / 多次提交；每次结果只更新 React state，不写 DB
+
+算法回合的设计目的：让候选人获得代码级别的练习反馈，而面试官 Agent 仍以对话形式考察设计取舍。两条流在时间线上并行（用户在某轮对话间穿插手写代码），但产物完全独立。
 
 ## 核对与自测
 

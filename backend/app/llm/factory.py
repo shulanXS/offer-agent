@@ -13,151 +13,36 @@ from app.core.logging_utils import log_payload
 
 
 logger = logging.getLogger("uvicorn.error")
-_REASONING_MARKERS = (
-    "让我分析一下",
-    "用户要求我",
-    "我需要生成",
-    "让我写一个自然的追问",
-    "让我思考一下",
-    "最终版本",
-    "追问方向提示",
-    "字数：",
-    "符合要求",
-    "上一轮回答",
-)
-
-_SPOKEN_OUTPUT_MARKERS = (
-    "最终版本：",
-    "最终版本:",
-    "让我写一个自然的追问：",
-    "让我写一个自然的追问:",
-    "比如：",
-    "比如:",
-    "例如：",
-    "例如:",
-)
-
-_META_LINE_PATTERNS = (
-    re.compile(r"^用户要求"),
-    re.compile(r"^让我分析"),
-    re.compile(r"^我需要"),
-    re.compile(r"^考虑到"),
-    re.compile(r"^由于题目"),
-    re.compile(r"^要求[：:]"),
-    re.compile(r"^追问方向"),
-    re.compile(r"^上一轮回答"),
-    re.compile(r"^这个追问"),
-    re.compile(r"^或者可以"),
-    re.compile(r"^让我再调整"),
-    re.compile(r"^让我数一下"),
-    re.compile(r"字数"),
-    re.compile(r"符合要求"),
-    re.compile(r"^可以追问"),
-    re.compile(r"^我觉得"),
-    re.compile(r"^我会问"),
-    re.compile(r"^我选择"),
-    re.compile(r"^- "),
-    re.compile(r"^\d+\.\s"),
-)
 
 _SPOKEN_JSON_KEYS = ("message", "follow_up", "transition", "text")
 
 
-def _looks_like_reasoning_output(text: str) -> bool:
-    stripped = (text or "").strip()
-    if not stripped:
-        return False
-    if any(marker in stripped for marker in _REASONING_MARKERS):
-        return True
-    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
-    bullet_count = sum(1 for line in lines if line.startswith("- "))
-    return bullet_count >= 3 and len(lines) >= 5
-
-
-def _strip_wrapping_quotes(text: str) -> str:
-    text = text.strip()
-    for open_quote, close_quote in (('"', '"'), ("“", "”"), ("'", "'"), ("「", "」")):
-        if text.startswith(open_quote) and text.endswith(close_quote) and len(text) > 2:
-            return text[len(open_quote) : -len(close_quote)].strip()
+def _strip_fence(content: str) -> str:
+    """仅在 content 以 ``` 围栏开头时剥围栏。其它情况原样返回。"""
+    text = (content or "").strip()
+    if text.startswith("```json"):
+        body = text[len("```json"):]
+        if "```" in body:
+            return body.split("```", 1)[0].strip()
+        return body.strip()
+    if text.startswith("```"):
+        body = text[len("```"):]
+        if "```" in body:
+            return body.split("```", 1)[0].strip()
+        return body.strip()
     return text
 
 
-def _is_meta_line(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped:
-        return True
-    return any(pattern.search(stripped) for pattern in _META_LINE_PATTERNS)
-
-
-def _collect_spoken_candidates(text: str) -> list[str]:
-    candidates: list[str] = []
-
-    for match in re.finditer(r'["“]([^"”]{12,})["”]', text):
-        part = match.group(1).strip()
-        if part and not _is_meta_line(part):
-            candidates.append(part)
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        for segment in re.split(r'["”\'」]\s+(?=[\u4e00-\u9fff好的您你请])', line):
-            segment = _strip_wrapping_quotes(segment.strip())
-            if not segment:
-                continue
-            for part in re.split(r"(?<=[。！？?])\s+", segment):
-                part = _strip_wrapping_quotes(part.strip())
-                if part and not _is_meta_line(part) and len(part) >= 12:
-                    candidates.append(part)
-
-    if candidates:
-        return candidates
-
-    cleaned = _strip_wrapping_quotes(re.sub(r"\s+", " ", text).strip())
-    for part in re.split(r"(?<=[。！？?])\s+", cleaned):
-        part = _strip_wrapping_quotes(part.strip())
-        if part and not _is_meta_line(part) and len(part) >= 12:
-            candidates.append(part)
-    return candidates
-
-
-def _pick_best_spoken_line(candidates: list[str]) -> str:
-    if not candidates:
-        return ""
-
-    def score_line(line: str) -> int:
-        value = 0
-        if "？" in line or line.endswith("?") or "吗" in line:
-            value += 3
-        if any(token in line for token in ("你", "您", "请", "能否", "可以", "好的")):
-            value += 2
-        if _is_meta_line(line):
-            value -= 10
-        return value
-
-    best_score = max(score_line(line) for line in candidates)
-    best_lines = [line for line in candidates if score_line(line) == best_score]
-    for line in reversed(candidates):
-        if line in best_lines:
-            return line
-    return candidates[-1]
-
-
 def extract_spoken_response(text: str) -> str:
-    content = (text or "").strip()
-    if not content or not _looks_like_reasoning_output(content):
-        return content
+    """2.3：极简版本——原样返回，只剥 ``` 围栏。其它清理交给 prompt 强约束。
 
-    for marker in _SPOKEN_OUTPUT_MARKERS:
-        if marker in content:
-            tail = content.rsplit(marker, 1)[-1].strip()
-            candidate = _pick_best_spoken_line(_collect_spoken_candidates(tail))
-            if candidate:
-                return candidate
-
-    candidate = _pick_best_spoken_line(_collect_spoken_candidates(content))
-    return candidate or content
+    配合 §1.2 删除 opening LLM 改写，输出不洁直接 raise 让上游降级到模板问题。
+    """
+    return _strip_fence(text or "")
 
 
 def extract_spoken_message(payload: Any) -> str:
+    """2.3：直接读 payload 字段，去除正则。"""
     if not isinstance(payload, dict):
         return ""
     for key in _SPOKEN_JSON_KEYS:
@@ -224,13 +109,7 @@ def _iter_json_candidates(content: str) -> list[Any]:
 
 
 def _extract_json(text: str) -> Any:
-    content = (text or "").strip()
-    if not content:
-        raise ValueError("empty response")
-    if "```json" in content:
-        content = content.split("```json", 1)[1].split("```", 1)[0].strip()
-    elif "```" in content:
-        content = content.split("```", 1)[1].split("```", 1)[0].strip()
+    content = _strip_fence(text or "")
 
     candidates = _iter_json_candidates(content)
     if candidates:
@@ -521,7 +400,7 @@ def create_llm_client(provider: str | None = None, model_name: str | None = None
     if not selected_provider:
         raise ValueError("LLM_PROVIDER 未配置")
 
-    if selected_provider in {"openai"}:
+    if selected_provider == "openai":
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY 未配置")
         model = ChatOpenAI(
@@ -533,7 +412,7 @@ def create_llm_client(provider: str | None = None, model_name: str | None = None
         )
         return LangChainLLMClient("openai", selected_model or "gpt-4o-mini", model)
 
-    if selected_provider in {"anthropic", "claude", "claude_code"}:
+    if selected_provider == "anthropic":
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY 未配置")
         anthropic_kwargs: dict[str, Any] = {
@@ -551,7 +430,7 @@ def create_llm_client(provider: str | None = None, model_name: str | None = None
         model = ChatAnthropic(**anthropic_kwargs)
         return LangChainLLMClient("anthropic", selected_model or "claude-3-5-sonnet-20241022", model)
 
-    if selected_provider in {"volcengine", "volc", "ark", "huoshan"}:
+    if selected_provider == "volcengine":
         if not settings.volcengine_api_key:
             raise ValueError("VOLCENGINE_API_KEY 未配置")
         model = ChatOpenAI(
@@ -563,4 +442,4 @@ def create_llm_client(provider: str | None = None, model_name: str | None = None
         )
         return LangChainLLMClient("volcengine", selected_model or "doubao-seed-1-6-flash-250715", model)
 
-    raise ValueError(f"不支持的 LLM_PROVIDER: {selected_provider}")
+    raise ValueError(f"不支持的 LLM_PROVIDER: {selected_provider}（支持：openai、anthropic、volcengine）")

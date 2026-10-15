@@ -86,6 +86,8 @@ def record_session_outcome(*, user_id: int, session_id: str) -> dict[str, Any] |
         user_id=user_id,
         outcome_rows=outcomes,
     )
+    # 3.4：评估完成时检查"已 decrement 但无 outcome"孤儿 → 触发补偿
+    store.audit_outcome_for_session(session_id, reason="evaluation_completed")
     profile_json = aggregate_profile([item["outcome_json"] for item in eligible_outcomes])
     store.upsert_learning_profile(
         user_id=user_id,

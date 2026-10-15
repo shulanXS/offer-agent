@@ -1,0 +1,14 @@
+{
+  "title": "充值",
+  "quota_left": "剩余额度：{{count}}",
+  "sub_expires_at": "有效期至 {{date}}",
+  "per_month": "/ 月",
+  "per_package": "/ {{count}} 次",
+  "pay_now": "立即支付",
+  "paying": "处理中…",
+  "paid": "已支付",
+  "mock_note": "演示支付 — 不会真实扣款",
+  "tier_free": "免费",
+  "tier_paid": "付费",
+  "tier_subscription": "月卡"
+}

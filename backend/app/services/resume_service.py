@@ -28,6 +28,7 @@ class ResumeService:
         self, *, user_id: int, file: UploadFile, model_provider: str = "", model_name: str = ""
     ) -> dict[str, Any]:
         trace_id = new_trace_id("resume")
+        # 3.3：先查扩展名，避免恶意大文件占内存
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in self.allowed_extensions:
             logger.warning(
@@ -39,7 +40,11 @@ class ResumeService:
             )
             raise_app_error(400, ErrorCode.RESUME_FILE_TYPE_UNSUPPORTED, "仅支持 pdf/txt/md/docx 简历文件", trace_id=trace_id)
 
-        content = await file.read()
+        # 3.3：先读 max+1 字节，超限立即拒绝
+        content = await file.read(settings.max_upload_bytes + 1)
+        if len(content) > settings.max_upload_bytes:
+            raise_app_error(413, ErrorCode.RESUME_TOO_LARGE, f"简历文件过大（上限 5MB）", trace_id=trace_id)
+
         logger.info(
             "[trace_id=%s] Resume upload received: filename=%s suffix=%s size_bytes=%s user_id=%s",
             trace_id,

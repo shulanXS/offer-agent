@@ -24,5 +24,14 @@
   "request_timeout": "请求超时，请稍后重试",
   "stream_unsupported": "浏览器不支持当前流式能力",
   "stream_failed": "流式请求失败",
-  "unauthorized": "登录已失效，请重新登录"
+  "unauthorized": "登录已失效，请重新登录",
+  "not_found": "您访问的页面不存在。",
+  "back_to_resumes": "返回简历",
+  "back_to_records": "返回记录",
+  "selling_point_1_title": "基于近 3 年 3000+ 真实面试数据",
+  "selling_point_1_desc": "题型与考察节奏来自 FAANG 及国内一线大厂（2022–2025），比通用聊天工具更贴近真实面试官。",
+  "selling_point_2_title": "计划 → 执行 → 证据三段式",
+  "selling_point_2_desc": "确认前看到完整计划，每道题都对照计划提问，每条评分都对应你的原话。",
+  "selling_point_3_title": "评分可追溯",
+  "selling_point_3_desc": "每个能力分都链回你回答中的原句，不靠印象分。"
 }

@@ -67,6 +67,8 @@ def needs_rehash(hashed_password: str) -> bool:
 
 
 def create_access_token(payload: Dict[str, Any]) -> str:
+    if not settings.jwt_secret:
+        raise RuntimeError("jwt_secret 未配置或为空，请设置 JWT_SECRET 环境变量")
     expire_at = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     token_payload = {**payload, "exp": expire_at}
     return jwt.encode(token_payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)

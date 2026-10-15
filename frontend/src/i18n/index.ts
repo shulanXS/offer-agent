@@ -18,6 +18,7 @@ import evaluationEn from '../locales/en/evaluation.json'
 import errorsEn from '../locales/en/errors.json'
 import plansEn from '../locales/en/plans.json'
 import recordsEn from '../locales/en/records.json'
+import billingEn from '../locales/en/billing.json'
 
 import commonZh from '../locales/zh/common.json'
 import sidebarZh from '../locales/zh/sidebar.json'
@@ -28,6 +29,7 @@ import evaluationZh from '../locales/zh/evaluation.json'
 import errorsZh from '../locales/zh/errors.json'
 import plansZh from '../locales/zh/plans.json'
 import recordsZh from '../locales/zh/records.json'
+import billingZh from '../locales/zh/billing.json'
 
 export const SUPPORTED_LOCALES = ['en', 'zh'] as const
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
@@ -46,6 +48,7 @@ const resources = {
     errors: errorsEn,
     plans: plansEn,
     records: recordsEn,
+    billing: billingEn,
   },
   zh: {
     common: commonZh,
@@ -57,6 +60,7 @@ const resources = {
     errors: errorsZh,
     plans: plansZh,
     records: recordsZh,
+    billing: billingZh,
   },
 } as const
 
@@ -78,6 +82,7 @@ void i18n
       'errors',
       'plans',
       'records',
+      'billing',
     ],
     defaultNS: 'common',
     detection: {

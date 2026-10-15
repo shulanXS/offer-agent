@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useTranslation } from 'react-i18next'
+import type { ReactNode } from 'react'
 
 export type AuthMode = 'login' | 'register'
 
@@ -13,6 +14,7 @@ interface AuthPageProps {
   notice: string
   password: string
   username: string
+  leadingSlot?: ReactNode
   onAuthModeChange: (mode: AuthMode) => void
   onPasswordChange: (value: string) => void
   onSubmit: () => Promise<void>
@@ -26,6 +28,7 @@ export function AuthPage({
   notice,
   password,
   username,
+  leadingSlot,
   onAuthModeChange,
   onPasswordChange,
   onSubmit,
@@ -35,6 +38,7 @@ export function AuthPage({
   const { t: tc } = useTranslation('common')
   return (
     <main className="v2-shell v2-auth-shell">
+      {leadingSlot ? <div className="v2-auth-leading">{leadingSlot}</div> : null}
       <Card className="v2-auth-card">
         <span className="v2-kicker">{t('kicker')}</span>
         <h1>{t('headline')}</h1>

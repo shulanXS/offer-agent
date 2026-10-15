@@ -67,6 +67,8 @@ export interface InterviewConfigurationSnapshot {
   duration_minutes?: number
   focus_topics?: string[]
   jd_text?: string
+  include_algorithm?: boolean
+  custom_target_role?: string
 }
 
 export interface RegeneratePlanRequest {

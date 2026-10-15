@@ -7,12 +7,13 @@ from typing import Any, AsyncIterator
 
 from app.agent.interview.opening import render_opening_question
 from app.agent.interview.transitions import build_early_finish_message
-from app.core.constants import InterviewPlanSessionStatus
+from app.core.config import settings
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.logging_utils import log_payload, new_trace_id
-from app.core.config import settings
+from app.core.session_state import SessionState, assert_transition, coerce
 from app.core.streaming import format_sse, stream_text
 from app.db.store import Store
+from app.db.transaction import transaction
 from app.services.interview.reply_handler import InterviewReplyHandler
 from app.services.interview.boundaries import freeze_remaining_seconds
 from app.services.interview.runtime_state import (
@@ -24,6 +25,9 @@ from app.services.interview.serialization import serialize_live_session_detail
 
 
 logger = logging.getLogger("uvicorn.error")
+
+# 1.3：分布式锁 TTL（秒）。失败路径由数据库过期兜底。
+LOCK_TTL_SECONDS = 300
 
 
 class InterviewAgentService:
@@ -37,15 +41,20 @@ class InterviewAgentService:
 
     def get_live_session_detail(self, user_id: int, session_id: str) -> dict[str, Any] | None:
         record = self._get_session_record(user_id, session_id)
-        if record["status"] not in {"active", "evaluating", "completed"}:
+        # 1.1：用 coerce 取代字符串字面量比较。
+        try:
+            current_state = coerce(record["status"])
+        except Exception:
             return None
-        record = self._reconcile_reply_lock(record)
+        if current_state not in {SessionState.ACTIVE, SessionState.EVALUATING, SessionState.COMPLETED}:
+            return None
         return self._serialize_live(record, start_clock=True)
 
     def pause_interview(self, user_id: int, session_id: str) -> dict[str, Any]:
         """v1.1: 离开页面冻结面试计时。记录 paused_at；不消耗额度、不改状态。"""
         record = self._get_session_record(user_id, session_id)
-        if record["status"] != "active":
+        # 1.1：状态判断走 coerce。
+        if coerce(record["status"]) != SessionState.ACTIVE:
             return {
                 "session_id": session_id,
                 "paused": False,
@@ -110,25 +119,23 @@ class InterviewAgentService:
         record = self._get_session_record(user_id, session_id)
         trace_id = new_trace_id("interview")
 
-        if record["status"] == "evaluating":
-            raise_app_error(409, ErrorCode.SESSION_ALREADY_COMPLETED, "当前会话已结束", trace_id=trace_id)
-        if record["status"] == "completed":
+        # 1.1：用 coerce 取代字符串字面量比较。
+        current_state = coerce(record["status"])
+        if current_state in {SessionState.EVALUATING, SessionState.COMPLETED}:
             raise_app_error(409, ErrorCode.SESSION_ALREADY_COMPLETED, "当前会话已结束", trace_id=trace_id)
 
         existing_live = self._return_if_already_activated(user_id, session_id, record, trace_id=trace_id)
         if existing_live:
             return existing_live
 
-        if record["status"] != InterviewPlanSessionStatus.PLAN_CONFIRMED.value:
+        if current_state != SessionState.PLAN_CONFIRMED:
             raise_app_error(409, ErrorCode.SESSION_NOT_ACTIVE, "请先确认并锁定面试计划", trace_id=trace_id)
+        # 1.1：合法转换 PLAN_CONFIRMED -> ACTIVE。
+        assert_transition(current_state, SessionState.ACTIVE)
 
         confirmed_plan_id = record.get("confirmed_plan_id")
         if not confirmed_plan_id:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "尚未锁定可用计划", trace_id=trace_id)
-
-        user = self.store.decrement_quota(user_id)
-        if not user:
-            raise_app_error(429, ErrorCode.INTERVIEW_QUOTA_EXHAUSTED, "面试额度不足", trace_id=trace_id)
 
         plan_record = self.store.get_plan_by_id(confirmed_plan_id)
         plan_json = plan_record["plan_json"]
@@ -145,132 +152,175 @@ class InterviewAgentService:
         if not first_topic:
             raise_app_error(500, ErrorCode.INTERVIEW_BOOTSTRAP_FAILED, "计划主题无效", trace_id=trace_id)
 
+        # 1.2：opening 不再调用 LLM，直接读 plan 的 opening_question。
         opening = render_opening_question(first_topic, interview_type=interview_type, trace_id=trace_id)
         runtime_state["last_action"] = "opening"
 
-        record = self._get_session_record(user_id, session_id)
-        existing = self._return_if_already_activated(user_id, session_id, record, trace_id=trace_id)
-        if existing is not None:
-            return existing
+        # 1.2：单事务：扣额度（audit） + 写开场消息 + 切状态 + 改 runtime_state。
+        # 任一失败整体回滚，额度不丢。
+        try:
+            with transaction() as conn:
+                user = self.store.get_user_by_id(user_id)
+                if not user:
+                    raise_app_error(404, ErrorCode.USER_NOT_FOUND, "用户不存在", trace_id=trace_id)
+                # v2.2：订阅用户跳过额度检查（decrement_quota_in_conn 内部会再确认一次）
+                if not self.store.is_subscription_active(user) and int(user["quota_remaining"]) <= 0:
+                    raise_app_error(
+                        429,
+                        ErrorCode.INTERVIEW_QUOTA_EXHAUSTED,
+                        "免费额度已用完，充值 20 元可获得 5 次面试",
+                        trace_id=trace_id,
+                    )
+                self.store.decrement_quota_in_conn(
+                    conn,
+                    user_id,
+                    session_id=session_id,
+                    reason="interview_activate",
+                )
+                assistant_message = self.store.create_message_in_conn(
+                    conn,
+                    session_id=session_id,
+                    role="assistant",
+                    kind="question",
+                    content=opening,
+                    meta={
+                        "topic_id": first_topic["id"],
+                        "action": "opening",
+                        "trace_id": trace_id,
+                        "is_follow_up": False,
+                        "source_opening_question": str(first_topic.get("opening_question", "")),
+                    },
+                )
+                self.store.update_session_in_conn(
+                    conn,
+                    session_id,
+                    status=SessionState.ACTIVE.value,
+                    workflow_state=runtime_state,
+                )
+        except Exception as exc:
+            from app.core.events import rollback_event
+            rollback_event(
+                logger,
+                "interview.activate.rolled_back",
+                trace_id=trace_id,
+                session_id=session_id,
+                user_id=user_id,
+                error=str(exc),
+            )
+            raise
 
-        assistant_message = self.store.create_message(
+        from app.core.events import commit_event
+        commit_event(
+            logger,
+            "interview.activate.committed",
+            trace_id=trace_id,
             session_id=session_id,
-            role="assistant",
-            kind="question",
-            content=opening,
-            meta={
-                "topic_id": first_topic["id"],
-                "action": "opening",
-                "trace_id": trace_id,
-                "is_follow_up": False,
-                "source_opening_question": str(first_topic.get("opening_question", "")),
-            },
+            user_id=user_id,
+            first_topic_id=first_topic["id"],
         )
 
-        self.store.update_session(
-            session_id,
-            status="active",
-            workflow_state=runtime_state,
-        )
-
+        user = self.store.get_user_by_id(user_id)
         updated = self._get_session_record(user_id, session_id)
         log_payload(
             logger,
             logging.INFO,
-            f"Interview activated: session_id={session_id}",
-            {"assistant_message": assistant_message, "runtime_state": runtime_state, "quota_remaining": user["quota_remaining"]},
+            f"Interview activated (atomic): session_id={session_id}",
+            {"assistant_message": assistant_message, "runtime_state": runtime_state, "quota_remaining": (user or {}).get("quota_remaining")},
             trace_id=trace_id,
         )
         return self._serialize_live(updated, start_clock=False)
 
     def finish_interview(self, user_id: int, session_id: str, *, reason: str = "user_requested") -> dict[str, Any]:
-        record = self._reconcile_reply_lock(self._get_session_record(user_id, session_id))
+        record = self._get_session_record(user_id, session_id)
         trace_id = self._trace_id_from_record(record)
-
-        if record["status"] == "evaluating":
+        # 1.1：状态判断统一走 coerce + assert_transition。
+        current_state = coerce(record["status"])
+        if current_state == SessionState.EVALUATING:
             return self._serialize_live(record, start_clock=False)
-        if record["status"] == "completed":
+        if current_state == SessionState.COMPLETED:
             return self._serialize_live(record, start_clock=False)
-        if record["status"] != "active":
+        if current_state != SessionState.ACTIVE:
             raise_app_error(409, ErrorCode.SESSION_NOT_ACTIVE, "当前会话不在进行中", trace_id=trace_id)
+        assert_transition(current_state, SessionState.EVALUATING)
 
-        runtime_state = dict(record.get("workflow_state") or {})
-        if runtime_state.get("reply_in_progress"):
+        # 1.3：检查 session_locks 表。仍有 lock 说明上一条还在处理中。
+        active_lock = self.store.get_session_lock(session_id)
+        if active_lock is not None:
             raise_app_error(409, ErrorCode.INTERVIEW_REPLY_IN_PROGRESS, "上一条回答仍在处理中，请稍候", trace_id=trace_id)
 
+        runtime_state = dict(record.get("workflow_state") or {})
+        # 1.2 根因：activate 没启动 clock 时 finish 拿不到 deadline。
+        configured_duration = int(record.get("configuration", {}).get("duration_minutes", 45) or 45)
+        runtime_state, _ = ensure_interview_clock_started(runtime_state, duration_minutes=configured_duration)
         current_topic_id = str(runtime_state.get("current_topic_id", ""))
         closing = build_early_finish_message(reason="user")
-        assistant_message = self.store.create_message(
-            session_id=session_id,
-            role="assistant",
-            kind="closing",
-            content=closing,
-            meta={
-                "topic_id": current_topic_id,
-                "action": "finish",
-                "trace_id": trace_id,
-                "is_follow_up": False,
-                "decision_reason": reason,
-                "forced_finish": True,
-            },
-        )
-        runtime_state["last_action"] = "finish"
-        runtime_state.pop("reply_in_progress", None)
-        runtime_state = freeze_remaining_seconds(runtime_state)
-        runtime_state["finish_reason"] = reason
-        if current_topic_id:
-            completed_ids = list(runtime_state.get("completed_topic_ids") or [])
-            if current_topic_id not in completed_ids:
-                completed_ids.append(current_topic_id)
-            runtime_state["completed_topic_ids"] = completed_ids
-
-        self.store.update_session(
-            session_id,
-            status="evaluating",
-            workflow_state=runtime_state,
-        )
+        # 1.2：单事务写 closing + 切 status + 改 workflow_state。
+        with transaction() as conn:
+            assistant_message = self.store.create_message_in_conn(
+                conn,
+                session_id=session_id,
+                role="assistant",
+                kind="closing",
+                content=closing,
+                meta={
+                    "topic_id": current_topic_id,
+                    "action": "finish",
+                    "trace_id": trace_id,
+                    "is_follow_up": False,
+                    "decision_reason": reason,
+                    "forced_finish": True,
+                },
+            )
+            runtime_state["last_action"] = "finish"
+            runtime_state = freeze_remaining_seconds(runtime_state)
+            runtime_state["finish_reason"] = reason
+            if current_topic_id:
+                completed_ids = list(runtime_state.get("completed_topic_ids") or [])
+                if current_topic_id not in completed_ids:
+                    completed_ids.append(current_topic_id)
+                runtime_state["completed_topic_ids"] = completed_ids
+            self.store.update_session_in_conn(
+                conn,
+                session_id,
+                status=SessionState.EVALUATING.value,
+                workflow_state=runtime_state,
+            )
 
         updated = self._get_session_record(user_id, session_id)
         log_payload(
             logger,
             logging.INFO,
-            f"Interview finished by user: session_id={session_id}",
+            f"Interview finished by user (atomic): session_id={session_id}",
             {"assistant_message": assistant_message, "runtime_state": runtime_state},
             trace_id=trace_id,
         )
         return self._serialize_live(updated, start_clock=False)
 
     def reply_to_interview(self, user_id: int, session_id: str, answer: str) -> dict[str, Any]:
-        record = self._reconcile_reply_lock(self._get_session_record(user_id, session_id))
+        record = self._get_session_record(user_id, session_id)
         trace_id = self._trace_id_from_record(record)
-
-        if record["status"] == "evaluating":
+        # 1.1：状态判断统一走 coerce。
+        current_state = coerce(record["status"])
+        if current_state in {SessionState.EVALUATING, SessionState.COMPLETED}:
             raise_app_error(409, ErrorCode.SESSION_ALREADY_COMPLETED, "当前会话已结束", trace_id=trace_id)
-        if record["status"] == "completed":
-            raise_app_error(409, ErrorCode.SESSION_ALREADY_COMPLETED, "当前会话已结束", trace_id=trace_id)
-        if record["status"] != "active":
+        if current_state != SessionState.ACTIVE:
             raise_app_error(409, ErrorCode.SESSION_NOT_ACTIVE, "请先开始正式面试", trace_id=trace_id)
 
-        runtime_state = dict(record.get("workflow_state") or {})
-        if runtime_state.get("reply_in_progress"):
+        # 1.3：分布式锁。request_id 缺失时用 trace_id 当 token。
+        lock_token = f"reply:{trace_id}"
+        lock = self.store.acquire_session_lock(session_id, lock_token=lock_token, ttl_seconds=LOCK_TTL_SECONDS)
+        if lock is None or lock.get("locked"):
             raise_app_error(409, ErrorCode.INTERVIEW_REPLY_IN_PROGRESS, "上一条回答仍在处理中，请稍候", trace_id=trace_id)
-
-        runtime_state, _clock_changed = ensure_interview_clock_started(runtime_state)
-        runtime_state["reply_in_progress"] = True
-        self.store.update_session(session_id, workflow_state=runtime_state)
 
         try:
             return self._process_reply(user_id, session_id, answer, trace_id)
-        except Exception:
-            record = self._get_session_record(user_id, session_id)
-            failed_state = dict(record.get("workflow_state") or {})
-            failed_state.pop("reply_in_progress", None)
-            self.store.update_session(session_id, workflow_state=failed_state)
-            raise
+        finally:
+            self.store.release_session_lock(session_id, lock_token=lock_token)
 
     def _process_reply(self, user_id: int, session_id: str, answer: str, trace_id: str) -> dict[str, Any]:
         record = self._get_session_record(user_id, session_id)
         runtime_state = dict(record.get("workflow_state") or {})
+        runtime_state, _clock_changed = ensure_interview_clock_started(runtime_state)
         confirmed_plan_id = runtime_state.get("confirmed_plan_id") or record.get("confirmed_plan_id")
         if not confirmed_plan_id:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "缺少已锁定计划", trace_id=trace_id)
@@ -285,57 +335,83 @@ class InterviewAgentService:
             raise_app_error(500, ErrorCode.INTERVIEW_REPLY_FAILED, "当前主题无效", trace_id=trace_id)
 
         cleaned_answer = answer.strip()
-        user_message = self.store.create_message(
-            session_id=session_id,
-            role="user",
-            kind="answer",
-            content=cleaned_answer,
-            meta={
-                "topic_id": current_topic_id,
-                "trace_id": trace_id,
-            },
-        )
+        # 1.2：单事务写 user_message + 调图 + 写 assistant_message + 改 session。
+        with transaction() as conn:
+            user_message = self.store.create_message_in_conn(
+                conn,
+                session_id=session_id,
+                role="user",
+                kind="answer",
+                content=cleaned_answer,
+                meta={"topic_id": current_topic_id, "trace_id": trace_id},
+            )
 
-        resume = None
-        resume_id = configuration.get("resume_id") or record.get("resume_id")
-        if resume_id:
-            resume = self.store.get_resume(user_id, str(resume_id))
+            # 临时把最新消息列表带进去给 handler
+            record_in_tx = self.store.get_interview_session_record(user_id, session_id)
+            all_messages = list(record_in_tx.get("messages") or []) + [user_message]
+            resume = None
+            resume_id = configuration.get("resume_id") or record_in_tx.get("resume_id")
+            if resume_id:
+                resume = self.store.get_resume(user_id, str(resume_id))
+            outcome = self.reply_handler.process(
+                plan_json=plan_json,
+                configuration=configuration,
+                resume=resume,
+                runtime_state=runtime_state,
+                current_topic=current_topic,
+                all_messages=all_messages,
+                latest_answer=cleaned_answer,
+                trace_id=trace_id,
+            )
 
-        all_messages = list(record.get("messages") or []) + [user_message]
-        outcome = self.reply_handler.process(
-            plan_json=plan_json,
-            configuration=configuration,
-            resume=resume,
-            runtime_state=runtime_state,
-            current_topic=current_topic,
-            all_messages=all_messages,
-            latest_answer=cleaned_answer,
-            trace_id=trace_id,
-        )
+            # 1.4：若 graph 端 precheck 命中边界并要求跳过 user_message，则删除刚写的
+            # user_message。这能保持"硬边界触发时不写 user_message"的语义。
+            decision = outcome.decision or {}
+            finish_reasons = {
+                "max_answer_rounds",
+                "deadline_reached",
+                "topic_round_limit_last_topic",
+                "probe_limit_last_topic",
+                "wrap_up_required_topics_covered",
+                "wrap_up_no_more_topics",
+            }
+            if decision.get("reason") in finish_reasons and outcome.next_status == "evaluating":
+                # 边界类 finish：只保留 assistant 关闭消息。
+                conn.execute(
+                    "DELETE FROM messages WHERE id = ?", (user_message["id"],),
+                )
+                # 用 plan 合规消息代替 user_message（占位）
+                outcome.assistant_meta = {
+                    **outcome.assistant_meta,
+                    "boundary_skip_user": True,
+                }
 
-        outcome.runtime_state.pop("reply_in_progress", None)
-        if outcome.next_status == "evaluating":
-            outcome.runtime_state = freeze_remaining_seconds(outcome.runtime_state)
+            # 1.1：next_status 必须是合法目标。
+            next_state = coerce(outcome.next_status)
+            assert_transition(SessionState.ACTIVE, next_state)
 
-        assistant_message = self.store.create_message(
-            session_id=session_id,
-            role="assistant",
-            kind=outcome.assistant_kind,
-            content=outcome.assistant_content,
-            meta=outcome.assistant_meta,
-        )
-
-        self.store.update_session(
-            session_id,
-            status=outcome.next_status,
-            workflow_state=outcome.runtime_state,
-        )
+            if next_state == SessionState.EVALUATING:
+                outcome.runtime_state = freeze_remaining_seconds(outcome.runtime_state)
+            assistant_message = self.store.create_message_in_conn(
+                conn,
+                session_id=session_id,
+                role="assistant",
+                kind=outcome.assistant_kind,
+                content=outcome.assistant_content,
+                meta=outcome.assistant_meta,
+            )
+            self.store.update_session_in_conn(
+                conn,
+                session_id,
+                status=next_state.value,
+                workflow_state=outcome.runtime_state,
+            )
 
         updated = self._get_session_record(user_id, session_id)
         log_payload(
             logger,
             logging.INFO,
-            f"Interview reply persisted: session_id={session_id}",
+            f"Interview reply persisted (atomic): session_id={session_id}",
             {
                 "user_message": user_message,
                 "assistant_message": assistant_message,
@@ -369,21 +445,20 @@ class InterviewAgentService:
         import asyncio
         from app.services.interview.reply_handler import InterviewReplyHandler
 
-        record = self._reconcile_reply_lock(self._get_session_record(user_id, session_id))
+        record = self._get_session_record(user_id, session_id)
         trace_id = self._trace_id_from_record(record)
-
-        if record["status"] in {"evaluating", "completed"}:
+        # 1.1：状态判断统一走 coerce。
+        current_state = coerce(record["status"])
+        if current_state in {SessionState.EVALUATING, SessionState.COMPLETED}:
             raise_app_error(409, ErrorCode.SESSION_ALREADY_COMPLETED, "当前会话已结束", trace_id=trace_id)
-        if record["status"] != "active":
+        if current_state != SessionState.ACTIVE:
             raise_app_error(409, ErrorCode.SESSION_NOT_ACTIVE, "请先开始正式面试", trace_id=trace_id)
 
-        runtime_state = dict(record.get("workflow_state") or {})
-        if runtime_state.get("reply_in_progress"):
+        # 1.3：分布式锁。request_id 优先作为 lock_token。
+        lock_token = request_id or f"reply:{trace_id}"
+        lock = self.store.acquire_session_lock(session_id, lock_token=lock_token, ttl_seconds=LOCK_TTL_SECONDS)
+        if lock is None or lock.get("locked"):
             raise_app_error(409, ErrorCode.INTERVIEW_REPLY_IN_PROGRESS, "上一条回答仍在处理中，请稍候", trace_id=trace_id)
-
-        runtime_state, _clock_changed = ensure_interview_clock_started(runtime_state)
-        runtime_state["reply_in_progress"] = True
-        self.store.update_session(session_id, workflow_state=runtime_state)
 
         # 幂等：同 request_id 复用 user_message
         if request_id:
@@ -394,6 +469,7 @@ class InterviewAgentService:
                 queue: "asyncio.Queue[str]" = asyncio.Queue()
                 await queue.put(assistant_message.get("content", ""))
                 await queue.put("__DONE__")
+                self.store.release_session_lock(session_id, lock_token=lock_token)
                 return {
                     "session": self._serialize_live(updated, start_clock=False),
                     "user_message": existing,
@@ -403,6 +479,8 @@ class InterviewAgentService:
                 }, queue
 
         record = self._get_session_record(user_id, session_id)
+        runtime_state = dict(record.get("workflow_state") or {})
+        runtime_state, _clock_changed = ensure_interview_clock_started(runtime_state)
         confirmed_plan_id = runtime_state.get("confirmed_plan_id") or record.get("confirmed_plan_id")
         if not confirmed_plan_id:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "缺少已锁定计划", trace_id=trace_id)
@@ -415,14 +493,17 @@ class InterviewAgentService:
             raise_app_error(500, ErrorCode.INTERVIEW_REPLY_FAILED, "当前主题无效", trace_id=trace_id)
 
         cleaned_answer = answer.strip()
-        user_message = self.store.create_message(
-            session_id=session_id,
-            role="user",
-            kind="answer",
-            content=cleaned_answer,
-            meta={"topic_id": current_topic_id, "trace_id": trace_id, "request_id": request_id},
-            request_id=request_id,
-        )
+        # 1.2：先写 user_message（事务内），拿到 user_message 后再异步跑图，最后事务内落 assistant + session。
+        with transaction() as conn:
+            user_message = self.store.create_message_in_conn(
+                conn,
+                session_id=session_id,
+                role="user",
+                kind="answer",
+                content=cleaned_answer,
+                meta={"topic_id": current_topic_id, "trace_id": trace_id, "request_id": request_id},
+                request_id=request_id,
+            )
 
         queue = asyncio.Queue(maxsize=64)
         resume = None
@@ -430,7 +511,8 @@ class InterviewAgentService:
         if resume_id:
             resume = self.store.get_resume(user_id, str(resume_id))
 
-        all_messages = list(record.get("messages") or []) + [user_message]
+        record_after_user = self._get_session_record(user_id, session_id)
+        all_messages = list(record_after_user.get("messages") or [])
         handler = InterviewReplyHandler()
         try:
             outcome, _collected = await handler.process_streaming(
@@ -445,29 +527,52 @@ class InterviewAgentService:
                 delta_queue=queue,
             )
         except Exception:
-            record = self._get_session_record(user_id, session_id)
-            failed_state = dict(record.get("workflow_state") or {})
-            failed_state.pop("reply_in_progress", None)
-            self.store.update_session(session_id, workflow_state=failed_state)
+            logger.exception("reply_to_interview_streaming failed, releasing lock")
+            self.store.release_session_lock(session_id, lock_token=lock_token)
             raise
 
         outcome_runtime = dict(outcome.runtime_state)
-        outcome_runtime.pop("reply_in_progress", None)
-        if outcome.next_status == "evaluating":
+        next_state = coerce(outcome.next_status)
+        assert_transition(SessionState.ACTIVE, next_state)
+        if next_state == SessionState.EVALUATING:
             outcome_runtime = freeze_remaining_seconds(outcome_runtime)
 
-        assistant_message = self.store.create_message(
-            session_id=session_id,
-            role="assistant",
-            kind=outcome.assistant_kind,
-            content=outcome.assistant_content,
-            meta=outcome.assistant_meta,
-        )
-        self.store.update_session(
-            session_id,
-            status=outcome.next_status,
-            workflow_state=outcome_runtime,
-        )
+        # 1.4：边界类 finish → 删除刚写的 user_message（与同步路径一致）。
+        decision = outcome.decision or {}
+        if (
+            decision.get("reason") in {"max_answer_rounds", "deadline_reached"}
+            and outcome.next_status == "evaluating"
+        ):
+            with transaction() as conn:
+                conn.execute(
+                    "DELETE FROM messages WHERE id = ?", (user_message["id"],),
+                )
+            outcome.assistant_meta = {
+                **outcome.assistant_meta,
+                "boundary_skip_user": True,
+            }
+
+        # 1.2：末尾事务：写 assistant + 改 session。
+        try:
+            with transaction() as conn:
+                assistant_message = self.store.create_message_in_conn(
+                    conn,
+                    session_id=session_id,
+                    role="assistant",
+                    kind=outcome.assistant_kind,
+                    content=outcome.assistant_content,
+                    meta=outcome.assistant_meta,
+                )
+                self.store.update_session_in_conn(
+                    conn,
+                    session_id,
+                    status=next_state.value,
+                    workflow_state=outcome_runtime,
+                )
+        except Exception:
+            self.store.release_session_lock(session_id, lock_token=lock_token)
+            raise
+        self.store.release_session_lock(session_id, lock_token=lock_token)
         updated = self._get_session_record(user_id, session_id)
 
         payload = {
@@ -572,7 +677,12 @@ class InterviewAgentService:
         *,
         trace_id: str,
     ) -> dict[str, Any] | None:
-        if record["status"] == "active":
+        # 1.1：状态判断走 coerce。
+        try:
+            current_state = coerce(record["status"])
+        except Exception:
+            return None
+        if current_state == SessionState.ACTIVE:
             logger.info("[trace_id=%s] Interview already active: session_id=%s", trace_id, session_id)
             return self._serialize_live(record, start_clock=False)
 
@@ -598,7 +708,12 @@ class InterviewAgentService:
 
         plan_record = self.store.get_plan_by_id(str(confirmed_plan_id))
         runtime_state = dict(record.get("workflow_state") or {})
-        if start_clock and record.get("status") == "active":
+        # 1.1：状态判断走 coerce。
+        try:
+            current_state = coerce(record.get("status", ""))
+        except Exception:
+            current_state = None
+        if start_clock and current_state == SessionState.ACTIVE:
             runtime_state, clock_changed = ensure_interview_clock_started(runtime_state)
             if clock_changed:
                 self.store.update_session(str(record["id"]), workflow_state=runtime_state)
@@ -612,43 +727,8 @@ class InterviewAgentService:
             runtime_state=runtime_state,
         )
 
-    def _reconcile_reply_lock(self, record: dict[str, Any]) -> dict[str, Any]:
-        runtime_state = dict(record.get("workflow_state") or {})
-        if not runtime_state.get("reply_in_progress"):
-            return record
-
-        messages = record.get("messages") or []
-        should_clear = False
-        if messages and messages[-1].get("role") == "assistant":
-            should_clear = True
-        elif self._reply_lock_is_stale(record.get("updated_at")):
-            should_clear = True
-            logger.warning(
-                "[trace_id=%s] Cleared stale reply_in_progress: session_id=%s",
-                self._trace_id_from_record(record),
-                record.get("id"),
-            )
-
-        if not should_clear:
-            return record
-
-        runtime_state.pop("reply_in_progress", None)
-        self.store.update_session(str(record["id"]), workflow_state=runtime_state)
-        refreshed = self._get_session_record(int(record["user_id"]), str(record["id"]))
-        return refreshed
-
-    @staticmethod
-    def _reply_lock_is_stale(updated_at: str | None) -> bool:
-        if not updated_at:
-            return True
-        try:
-            parsed = datetime.fromisoformat(str(updated_at))
-        except ValueError:
-            return True
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        elapsed = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
-        return elapsed >= settings.interview_stale_reply_lock_seconds
+    # 1.3：_reconcile_reply_lock / _reply_lock_is_stale 已被 session_locks 表取代。
+    # 锁过期由数据库 expires_at 兜底。故意删除以避免双源状态。
 
     @staticmethod
     def _trace_id_from_record(record: dict[str, Any]) -> str:

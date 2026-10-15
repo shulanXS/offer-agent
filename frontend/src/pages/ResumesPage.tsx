@@ -7,6 +7,7 @@ import { CheckCircle2, Clock3, FileText, Info, Plus, Trash2 } from 'lucide-react
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ResumePreviewPanel } from '../components/ResumePreviewPanel'
+import { SellingHighlights } from '../components/SellingHighlights'
 import type { ResumeSummary } from '../types'
 import { formatDateTime, formatResumeMeta, getResumeBadge, MAX_RESUME_COUNT, type ResumeCardItem } from '../utils/resume'
 
@@ -56,6 +57,10 @@ export function ResumesPage({
           <div className="v2-hero-cube">AI</div>
         </div>
       </header>
+
+      <section className="v2-page-intro">
+        <SellingHighlights />
+      </section>
 
       {error ? <p className="v2-error">{error}</p> : null}
       <section className="v2-resume-page">

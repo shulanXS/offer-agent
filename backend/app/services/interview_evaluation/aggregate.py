@@ -31,23 +31,22 @@ def is_partial_score_coverage(*, scored_topic_count: int, total_topic_count: int
 def compute_overall_score(competencies: list[dict[str, Any]]) -> int | None:
     """B2：trim-mean + 覆盖权重。
 
-    - 输入为 1-5 分的 competency
-    - 不足 3 个有效分：直接平均（trim 无法生效）
-    - 3 个及以上：去掉最高最低各 1 个后取平均，再映射到 0-100
+    - 输入为 1.0-5.0 分的 competency
+    - 不足 3 个有效分：返回 None（避免"二点评分 = 70 分"误导用户；与"未考察主题不计入总分"一致）
+    - 3 个及以上：trim-mean，去掉最高最低各 1 个后取平均
     - 覆盖度低于 60% 时降权（乘以 0.8 + 0.2*覆盖率），不靠改 label 误导
+    - 返回仍映射到 0-100 整数分（label 字段在 schema 同步定义）
     """
-    scores = [int(item["score"]) for item in competencies if item.get("score") is not None]
-    if not scores:
+    scores = [float(item["score"]) for item in competencies if item.get("score") is not None]
+    if len(scores) < 3:
+        # 与"未考察主题不计入总分"语义一致：评分点不足时不该给总分。
         return None
     total = len(competencies) or 1
     coverage = len(scores) / total
 
-    if len(scores) >= 3:
-        sorted_scores = sorted(scores)
-        trimmed = sorted_scores[1:-1]
-        avg5 = sum(trimmed) / len(trimmed)
-    else:
-        avg5 = sum(scores) / len(scores)
+    sorted_scores = sorted(scores)
+    trimmed = sorted_scores[1:-1]
+    avg5 = sum(trimmed) / len(trimmed)
 
     score100 = avg5 / 5 * 100
     weighted = score100 * (0.8 + 0.2 * coverage)

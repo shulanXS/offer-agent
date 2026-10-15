@@ -8,6 +8,19 @@ from app.services.interview.actions import PROBE_ACTIONS
 from app.services.interview.boundaries import should_block_repeat_probe
 
 
+def route_after_ingest(
+    state: InterviewReplyState,
+) -> Literal["build_observe", "finalize_forced_finish", "finalize_advance"]:
+    # 1.4：precheck 命中边界，绕过 build_observe/extract_evidence。
+    if state.get("_skip_user_message"):
+        boundary = state.get("boundary") or {}
+        if boundary.get("forced_action") == "finish":
+            return "finalize_forced_finish"
+        if boundary.get("forced_action") == "next_topic":
+            return "finalize_advance"
+    return "build_observe"
+
+
 def route_after_boundary(
     state: InterviewReplyState,
 ) -> Literal["finish", "next_topic", "continue"]:

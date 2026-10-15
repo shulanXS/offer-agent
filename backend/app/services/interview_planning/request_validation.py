@@ -2,7 +2,15 @@
 from typing import Any
 
 from app.core.errors import ErrorCode, raise_app_error
-from app.services.interview_configuration_service import DURATION_MINUTES, INTERVIEW_TYPES, LANGUAGES, MAX_FOCUS_TOPICS, TARGET_LEVELS, TARGET_ROLES
+from app.services.interview_configuration_service import (
+    ALLOWED_DURATIONS,
+    DEFAULT_DURATION_MINUTES,
+    INTERVIEW_TYPES,
+    LANGUAGES,
+    MAX_FOCUS_TOPICS,
+    TARGET_LEVELS,
+    TARGET_ROLES,
+)
 from app.services.interview_planning.constants import (
     MAX_ADDITIONAL_INSTRUCTION_LENGTH,
     MAX_JD_TEXT_LENGTH,
@@ -10,9 +18,11 @@ from app.services.interview_planning.constants import (
     REGENERATION_STRATEGIES,
 )
 
+# v2.2: 允许的 target_role 值集合。`__custom__` 走 custom_target_role 字段
+# 验证，因此从白名单中排除（自定义值通过后续 normalize 步骤注入）。
 _ALLOWED_CONFIGURATION = {
     "interview_type": {item["value"] for item in INTERVIEW_TYPES},
-    "target_role": {item["value"] for item in TARGET_ROLES},
+    "target_role": {item["value"] for item in TARGET_ROLES} - {"__custom__"},
     "language": {item["value"] for item in LANGUAGES},
     "target_level": {item["value"] for item in TARGET_LEVELS},
 }
@@ -23,23 +33,57 @@ def validate_interview_configuration(payload: dict[str, Any], *, trace_id: str =
     if not resume_id:
         raise_app_error(400, ErrorCode.INTERVIEW_CONFIG_INVALID, "请选择简历", trace_id=trace_id)
 
-    for field, allowed in _ALLOWED_CONFIGURATION.items():
-        value = str(payload.get(field, "")).strip()
-        if value not in allowed:
-            raise_app_error(
-                400,
-                ErrorCode.INTERVIEW_CONFIG_INVALID,
-                f"字段 {field} 不在允许范围内",
-                trace_id=trace_id,
-                details={"field": field, "value": value},
-            )
-
-    duration_minutes = payload.get("duration_minutes", DURATION_MINUTES)
-    if duration_minutes != DURATION_MINUTES:
+    interview_type = str(payload.get("interview_type", "")).strip()
+    if interview_type not in _ALLOWED_CONFIGURATION["interview_type"]:
         raise_app_error(
             400,
             ErrorCode.INTERVIEW_CONFIG_INVALID,
-            f"面试时长固定为 {DURATION_MINUTES} 分钟",
+            "字段 interview_type 不在允许范围内",
+            trace_id=trace_id,
+            details={"field": "interview_type", "value": interview_type},
+        )
+
+    target_role_raw = str(payload.get("target_role", "")).strip()
+    custom_target_role = str(payload.get("custom_target_role", "")).strip()
+    if target_role_raw == "__custom__":
+        if not custom_target_role:
+            raise_app_error(
+                400,
+                ErrorCode.INTERVIEW_CONFIG_INVALID,
+                "请填写自定义 target role",
+                trace_id=trace_id,
+            )
+        target_role = custom_target_role
+    elif target_role_raw in _ALLOWED_CONFIGURATION["target_role"]:
+        target_role = target_role_raw
+    else:
+        raise_app_error(
+            400,
+            ErrorCode.INTERVIEW_CONFIG_INVALID,
+            "字段 target_role 不在允许范围内",
+            trace_id=trace_id,
+            details={"field": "target_role", "value": target_role_raw},
+        )
+
+    target_level = str(payload.get("target_level", "")).strip()
+    if target_level not in _ALLOWED_CONFIGURATION["target_level"]:
+        raise_app_error(
+            400,
+            ErrorCode.INTERVIEW_CONFIG_INVALID,
+            "字段 target_level 不在允许范围内",
+            trace_id=trace_id,
+            details={"field": "target_level", "value": target_level},
+        )
+
+    # v2.2: 兼容旧字段 language，缺省视为空字符串
+    language = str(payload.get("language", "")).strip() or "any"
+
+    duration_minutes = int(payload.get("duration_minutes", DEFAULT_DURATION_MINUTES) or DEFAULT_DURATION_MINUTES)
+    if duration_minutes not in ALLOWED_DURATIONS:
+        raise_app_error(
+            400,
+            ErrorCode.INTERVIEW_CONFIG_INVALID,
+            f"面试时长必须是 {ALLOWED_DURATIONS} 中的一个",
             trace_id=trace_id,
         )
 
@@ -63,15 +107,22 @@ def validate_interview_configuration(payload: dict[str, Any], *, trace_id: str =
             trace_id=trace_id,
         )
 
+    # v2.2: 开启算法轮次的合法性
+    include_algorithm = bool(payload.get("include_algorithm", False))
+    if include_algorithm and interview_type == "experienced":
+        # experienced 默认不开，但允许手动开启；不强约束
+        pass
+
     return {
         "resume_id": resume_id,
-        "interview_type": str(payload["interview_type"]).strip(),
-        "target_role": str(payload["target_role"]).strip(),
-        "language": str(payload["language"]).strip(),
-        "target_level": str(payload["target_level"]).strip(),
-        "duration_minutes": DURATION_MINUTES,
+        "interview_type": interview_type,
+        "target_role": target_role,
+        "language": language,
+        "target_level": target_level,
+        "duration_minutes": duration_minutes,
         "focus_topics": focus_topics,
         "jd_text": jd_text.strip(),
+        "include_algorithm": include_algorithm,
     }
 
 

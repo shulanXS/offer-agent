@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AppSidebar } from './components/AppSidebar'
 import { AuthLoading, AuthPage, type AuthMode } from './components/AuthPage'
+import { BillingPanel } from './components/BillingPanel'
 import { InterviewConfigurationPage } from './pages/InterviewConfigurationPage'
 import { InterviewEvaluationPage } from './pages/InterviewEvaluationPage'
 import { InterviewLivePage } from './pages/InterviewLivePage'
 import { InterviewPlanPage } from './pages/InterviewPlanPage'
 import { InterviewRecordsPage } from './pages/InterviewRecordsPage'
+import { NotFoundPage } from './pages/NotFoundPage'
 import { ResumesPage } from './pages/ResumesPage'
+import { SellingHighlights } from './components/SellingHighlights'
 import { getMe, login, register } from './services/auth'
 import { deleteResume, extractResume, getResume, listResumes } from './services/resume'
 import type { AuthResponse, ResumeSummary, UserProfile } from './types'
@@ -23,6 +26,8 @@ import {
 import { getStoredToken, registerUnauthorizedHandler, setStoredToken } from './services/client'
 import i18n from './i18n'
 import './App.css'
+
+const RETURN_PATH_STORAGE_KEY = 'offer-agent-return-path'
 
 export default function App() {
   return (
@@ -49,10 +54,20 @@ function AppRoutes() {
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [isExtracting, setIsExtracting] = useState(false)
   const [deletingResumeId, setDeletingResumeId] = useState('')
+  const [isBillingOpen, setIsBillingOpen] = useState(false)
 
-  // C4：401 自动清 token 并跳登录
+  // 4：401 自动清 token + 保留 returnUrl + 跳登录
   useEffect(() => {
     registerUnauthorizedHandler(() => {
+      // 仅在当前已登录时被踢出 → 记录 returnUrl
+      try {
+        const path = `${location.pathname}${location.search}`
+        if (path && path !== '/') {
+          sessionStorage.setItem(RETURN_PATH_STORAGE_KEY, path)
+        }
+      } catch {
+        /* 忽略 */
+      }
       clearAuth()
       navigate('/')
     })
@@ -76,7 +91,8 @@ function AppRoutes() {
       })
       .catch((err: unknown) => {
         if (!active) return
-        clearAuth()
+        // 注：401 已由 services/client.ts 的 unauthorizedHandler 提前处理（清 token + 跳登录）。
+        // 此处仅记录错误，避免 token 已被清却仍写 state 导致竞争。
         setError(readError(err))
       })
       .finally(() => {
@@ -110,8 +126,10 @@ function AppRoutes() {
       setPassword('')
       setNotice(i18n.t(`auth:notice_${authMode}`))
 
-      const returnPath = `${location.pathname}${location.search}`
-      if (returnPath.startsWith('/interviews/')) {
+      // 4：登录/注册成功后回跳到被踢出前的页面（如果存在）
+      const returnPath = readStoredReturnPath()
+      if (returnPath) {
+        clearStoredReturnPath()
         navigate(returnPath, { replace: true })
       }
     } catch (err) {
@@ -210,13 +228,14 @@ function AppRoutes() {
         onPasswordChange={setPassword}
         onSubmit={handleAuthSubmit}
         onUsernameChange={setUsername}
+        leadingSlot={<SellingHighlights compact />}
       />
     )
   }
 
   return (
     <main className="v2-shell">
-      <AppSidebar user={user} onLogout={clearAuth} />
+      <AppSidebar user={user} onLogout={clearAuth} onOpenBilling={() => setIsBillingOpen(true)} />
       <section className="v2-content" key={routeRemountKey}>
         <Routes location={location}>
           <Route path="/" element={<Navigate to="/resumes" replace />} />
@@ -243,9 +262,26 @@ function AppRoutes() {
           <Route path="/interviews/:sessionId/live" element={<InterviewLivePage token={token} />} />
           <Route path="/interviews/:sessionId/evaluation" element={<InterviewEvaluationPage token={token} />} />
           <Route path="/interviews" element={<InterviewRecordsPage token={token} />} />
-          <Route path="*" element={<Navigate to="/resumes" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </section>
+      <BillingPanel
+        open={isBillingOpen}
+        onClose={() => setIsBillingOpen(false)}
+        token={token}
+        onRecharged={(status) => {
+          setUser((current) =>
+            current
+              ? {
+                  ...current,
+                  quota_remaining: status.quota_remaining,
+                  tier: status.tier,
+                  subscription_expires_at: status.subscription_expires_at,
+                }
+              : current,
+          )
+        }}
+      />
     </main>
   )
 }
@@ -260,4 +296,20 @@ function readError(error: unknown) {
     }
   }
   return i18n.t('common:request_failed')
+}
+
+function readStoredReturnPath(): string {
+  try {
+    return sessionStorage.getItem(RETURN_PATH_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function clearStoredReturnPath(): void {
+  try {
+    sessionStorage.removeItem(RETURN_PATH_STORAGE_KEY)
+  } catch {
+    /* 忽略 */
+  }
 }

@@ -136,6 +136,16 @@ def get_learning_context_for_session(*, user_id: int, session_id: str) -> dict[s
     )
     cross_session_available = session_count >= 2 and bool(session_comparison)
 
+    # 2.4：取出最近一场的 overall_score；只有存在上半场（已完成且 eligible）时返回。
+    previous_overall_score: float | None = None
+    if previous_outcome is not None:
+        try:
+            prev_score = previous_outcome.get("overall_score")
+            if prev_score is not None:
+                previous_overall_score = float(prev_score)
+        except (TypeError, ValueError):
+            previous_overall_score = None
+
     return {
         "has_learning_profile": session_count >= 1,
         "session_count": session_count,
@@ -152,6 +162,7 @@ def get_learning_context_for_session(*, user_id: int, session_id: str) -> dict[s
             current_outcome=current_outcome,
         ),
         "repeat_weak_threshold": REPEAT_WEAK_THRESHOLD,
+        "previous_overall_score": previous_overall_score,
     }
 
 
@@ -180,4 +191,5 @@ def _empty_learning_context() -> dict[str, Any]:
         "cross_session_available": False,
         "practice_cross_session_hints": [],
         "repeat_weak_threshold": REPEAT_WEAK_THRESHOLD,
+        "previous_overall_score": None,
     }

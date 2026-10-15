@@ -7,7 +7,6 @@ CREATE_LLM_CLIENT_TARGETS = (
     "app.llm.factory.create_llm_client",
     "app.agent.interview.decide.create_llm_client",
     "app.agent.interview.act.create_llm_client",
-    "app.agent.interview.opening.create_llm_client",
     "app.agent.interview.evidence.extract.create_llm_client",
     "app.services.interview.topic_summary.create_llm_client",
     "app.agent.interview_planning.agent.create_llm_client",

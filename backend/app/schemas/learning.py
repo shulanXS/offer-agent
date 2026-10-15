@@ -67,3 +67,5 @@ class LearningContextResponse(BaseModel):
     cross_session_available: bool = False
     practice_cross_session_hints: list[PracticeCrossSessionHint] = Field(default_factory=list)
     repeat_weak_threshold: int = 2
+    # 2.4：上一场总分（用于跨场分数对比；None 表示无上一场或上一场无总分）
+    previous_overall_score: float | None = None

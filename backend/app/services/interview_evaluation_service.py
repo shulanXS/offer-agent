@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from app.core.errors import ErrorCode, raise_app_error
+from app.core.events import commit_event
 from app.core.logging_utils import log_payload, new_trace_id
 from app.db.store import Store
 from app.services.interview_evaluation.context import build_evaluation_context
@@ -72,6 +73,16 @@ class InterviewEvaluationService:
                 "elapsed_ms": elapsed_ms,
             },
             trace_id=trace_id,
+        )
+        commit_event(
+            logger,
+            "evaluation.completed",
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=user_id,
+            source=evaluation.get("source"),
+            overall_score=evaluation.get("overall_score"),
+            elapsed_ms=elapsed_ms,
         )
         return self._build_response(updated)
 

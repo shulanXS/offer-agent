@@ -116,7 +116,8 @@ def test_build_evidence_driven_report_without_agent() -> None:
     )
     assert report["source"] == "evidence_rule"
     assert len(report["competencies"]) == 2
-    assert report["overall_score"] is not None
+    # 域 2：trim-mean 在 < 3 评分时返回 None；测试断言 None 而不是 70
+    assert report["overall_score"] is None
     validate_competencies(report["competencies"], plan_json=plan_json)
     assert report["jd_match"] is None
     assert len(report["question_reviews"]) == 2

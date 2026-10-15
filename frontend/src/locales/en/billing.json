@@ -1,0 +1,14 @@
+{
+  "title": "Top up",
+  "quota_left": "Quota left: {{count}}",
+  "sub_expires_at": "Expires on {{date}}",
+  "per_month": "/ month",
+  "per_package": "/ {{count}} interviews",
+  "pay_now": "Pay now",
+  "paying": "Processing…",
+  "paid": "Paid",
+  "mock_note": "Demo payment — no real charge",
+  "tier_free": "Free",
+  "tier_paid": "Paid",
+  "tier_subscription": "Monthly"
+}

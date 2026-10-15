@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     app_name: str = "Offer Agent"
     app_env: str = "development"
-    jwt_secret: str = "-1cY5cSK5OLORJAJXEvnWPQXHQN8N-HY"
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 10080
     default_interview_quota: int = 5
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_max_bytes: int = 10 * 1024 * 1024
     log_backup_count: int = 5
-    log_payload_max_chars: int = 2000
+    log_payload_max_chars: int = 1000
     cors_origins_raw: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
     stream_chunk_size: int = 10
     stream_delay_ms: int = 25
@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     interview_context_max_chars: int = 4000
     interview_topic_summary_llm_min_chars: int = 200
     interview_stale_reply_lock_seconds: int = 300
+    max_upload_bytes: int = 5 * 1024 * 1024
+
+    # v2.2 充值档位配置（mock 支付，仅供审计）
+    package_single_price_cents: int = 2000   # 20元
+    package_single_interviews: int = 5
+    package_sub_price_cents: int = 20000      # 200元
+    package_sub_duration_days: int = 30
+    # 新用户默认免费面试次数（一次性）
+    new_user_free_quota: int = 1
 
     @property
     def database_file(self) -> Path:

@@ -99,7 +99,7 @@ def _derive_score(
     evidence: list[dict[str, Any]],
     covered: set[str],
     expected: list[str],
-) -> int | None:
+) -> float | None:
     if status == "unverified":
         return None
 
@@ -131,7 +131,8 @@ def _derive_score(
         if negative_count >= 1 and positive_count == 0:
             base = min(base, 1.35)
 
-    return int(max(1, min(5, round(base))))
+    # 保留 0.5 步进的浮点（1.0–5.0），不再整数化。
+    return round(max(1.0, min(5.0, base)), 2)
 
 
 def _derive_confidence(

@@ -66,6 +66,8 @@ export interface LearningContextResponse {
   cross_session_available: boolean
   practice_cross_session_hints: LearningPracticeCrossSessionHint[]
   repeat_weak_threshold: number
+  // 2.4：上一场总分（用于跨场分数对比；null 表示无上一场或上一场无总分）
+  previous_overall_score?: number | null
 }
 
 export interface UnifiedPracticeCard {

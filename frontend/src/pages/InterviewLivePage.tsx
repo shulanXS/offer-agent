@@ -1,5 +1,6 @@
 import { Card } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { AlgorithmTurn } from '@/components/AlgorithmTurn'
 import { CandidateAvatar, InterviewerAvatar } from '@/components/InterviewAvatars'
 import { LoadingOverlay } from '@/components/LoadingOverlay'
 import { useInterviewOptions } from '@/hooks/useInterviewConfiguration'
@@ -11,7 +12,7 @@ import { bcp47ForIntl } from '@/i18n/useLocale'
 import i18n from '@/i18n'
 import type { ChatMessage, StreamEvent } from '@/types'
 import { isLiveInterviewSession, type LiveInterviewSessionDetail } from '@/types/interviewLive'
-import { BarChart3, BriefcaseBusiness, Clock3, LoaderCircle, MessageSquare, SendHorizonal } from 'lucide-react'
+import { BarChart3, BriefcaseBusiness, Clock3, Code2, LoaderCircle, MessageSquare, SendHorizonal, X } from 'lucide-react'
 import { TypewriterStream } from '@/utils/typewriterStream'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -44,6 +45,8 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
   const [pendingAutoFinish, setPendingAutoFinish] = useState(false)
   const [showEvalGeneratingOverlay, setShowEvalGeneratingOverlay] = useState(false)
+  const [isAlgoPanelOpen, setIsAlgoPanelOpen] = useState(false)
+  const [algoResult, setAlgoResult] = useState<{ problem_id: string; overall: number } | null>(null)
   const replyAbortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
@@ -54,6 +57,9 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
     enabled: Boolean(sessionId) && sessionStatus === 'active',
   })
   const autoFinishTriggeredRef = useRef(false)
+  const warning60sTriggeredRef = useRef(false)
+  const warning30sTriggeredRef = useRef(false)
+  const [liveToast, setLiveToast] = useState<string | null>(null)
   const postFinishTriggeredRef = useRef(false)
 
   const { data, isLoading, refetch } = useLiveInterviewSession(token, sessionId)
@@ -144,11 +150,21 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
     if (sessionStatus !== 'active') {
       autoFinishTriggeredRef.current = false
       setPendingAutoFinish(false)
+      warning60sTriggeredRef.current = false
+      warning30sTriggeredRef.current = false
       return
+    }
+    // 5.7：60 秒 / 30 秒缓冲提示（只触发一次）
+    if (remainingSeconds === 60 && !warning60sTriggeredRef.current) {
+      warning60sTriggeredRef.current = true
+      setLiveToast(t('countdown_warning_60'))
+    } else if (remainingSeconds === 30 && !warning30sTriggeredRef.current) {
+      warning30sTriggeredRef.current = true
+      setLiveToast(t('countdown_warning_30'))
     }
     if (remainingSeconds !== 0) return
     setPendingAutoFinish(true)
-  }, [remainingSeconds, sessionStatus])
+  }, [remainingSeconds, sessionStatus, t])
 
   useEffect(() => {
     if (!pendingAutoFinish || sessionStatus !== 'active' || autoFinishTriggeredRef.current) return
@@ -368,8 +384,19 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
     )
   }
 
+  useEffect(() => {
+    if (!liveToast) return
+    const timer = window.setTimeout(() => setLiveToast(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [liveToast])
+
   return (
     <div className="v2-live-page">
+      {liveToast ? (
+        <div className="v2-live-toast" role="status" aria-live="polite">
+          {liveToast}
+        </div>
+      ) : null}
       <header className="v2-live-header">
         <div className="v2-live-header-top">
           <div className="v2-live-header-title-row">
@@ -377,15 +404,28 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
             <p className="v2-live-header-subtitle">{headerSubtitle}</p>
           </div>
           {!needsActivate && !isFinished ? (
-            <button
-              type="button"
-              className="v2-live-end-btn"
-              disabled={!canReply && !finishMutation.isPending}
-              onClick={() => setShowFinishConfirm(true)}
-            >
-              <Clock3 size={16} />
-              {t('live_end_btn')}
-            </button>
+            <div className="v2-live-header-actions">
+              {data && isLiveInterviewSession(data) && data.configuration?.include_algorithm ? (
+                <button
+                  type="button"
+                  className="v2-live-algo-btn"
+                  onClick={() => setIsAlgoPanelOpen((v) => !v)}
+                  aria-pressed={isAlgoPanelOpen}
+                >
+                  <Code2 size={16} />
+                  {isAlgoPanelOpen ? t('algo_close') : t('algo_open')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="v2-live-end-btn"
+                disabled={!canReply && !finishMutation.isPending}
+                onClick={() => setShowFinishConfirm(true)}
+              >
+                <Clock3 size={16} />
+                {t('live_end_btn')}
+              </button>
+            </div>
           ) : null}
         </div>
 
@@ -524,6 +564,35 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
             </Card>
           </section>
       )}
+
+      {isAlgoPanelOpen ? (
+        <aside className="v2-algo-panel" role="complementary" aria-label={t('algo_title')}>
+          <header className="v2-algo-panel-head">
+            <h3>{t('algo_title')}</h3>
+            <button
+              type="button"
+              className="v2-algo-panel-close"
+              onClick={() => setIsAlgoPanelOpen(false)}
+              aria-label={tc('close')}
+            >
+              <X size={18} />
+            </button>
+          </header>
+          <AlgorithmTurn
+            token={token}
+            problemId={algoResult?.problem_id || 'two_sum'}
+            disabled={!canReply}
+            onResult={(r) => {
+              setAlgoResult({ problem_id: r.problem_id, overall: r.overall })
+            }}
+          />
+          {algoResult ? (
+            <p className="v2-algo-panel-result">
+              {t('algo_result_overall', { score: algoResult.overall.toFixed(1) })}
+            </p>
+          ) : null}
+        </aside>
+      ) : null}
 
       <ConfirmDialog
         open={showFinishConfirm}

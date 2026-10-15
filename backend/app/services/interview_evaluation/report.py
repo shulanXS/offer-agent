@@ -147,6 +147,10 @@ def build_evidence_driven_report(
         "summary": summary,
         "candidate_review": candidate_review,
         "overall_score": overall_score,
+        "overall_score_label": (
+            "已评考察点均分" if (overall_score is not None and scored_topic_count >= 2)
+            else "评分点不足"
+        ),
         "coverage_rate": coverage_rate,
         "overall_confidence": overall_confidence,
         "coverage": {
@@ -186,8 +190,11 @@ def validate_competencies(competencies: list[dict[str, Any]], *, plan_json: dict
         score = competency.get("score")
         if status == "unverified" and score is not None:
             raise ValueError(f"unverified 能力不得有分数: {topic_id}")
-        if score is not None and not (1 <= int(score) <= 5):
-            raise ValueError(f"score 超出范围: {topic_id}")
+        # 2.1：浮点分允许（1.0–5.0，0.5 步进）。
+        if score is not None:
+            score_value = float(score)
+            if not (1.0 <= score_value <= 5.0):
+                raise ValueError(f"score 超出范围: {topic_id}")
 
         confidence = float(competency.get("confidence") or 0)
         if confidence < 0 or confidence > 1:

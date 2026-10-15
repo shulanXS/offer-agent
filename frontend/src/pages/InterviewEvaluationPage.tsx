@@ -179,7 +179,7 @@ function EvaluationReportView({
       <FeedbackSection highlights={highlights} weaknesses={weaknesses} />
 
       {showCrossSession && learningContext ? (
-        <SessionComparisonSection context={learningContext} />
+        <SessionComparisonSection context={learningContext} currentReport={report} />
       ) : null}
       {practiceCards.length ? (
         <PracticeSection

@@ -4,7 +4,9 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 
+from app.api.routes.algorithm import router as algorithm_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.billing import router as billing_router
 from app.api.routes.interview_options import router as interview_options_router
 from app.api.routes.interviews import router as interviews_router
 from app.api.routes.learning import router as learning_router
@@ -43,6 +45,8 @@ async def locale_middleware(request: Request, call_next):
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
+api_router.include_router(algorithm_router)
+api_router.include_router(billing_router)
 api_router.include_router(interview_options_router)
 api_router.include_router(interviews_router)
 api_router.include_router(learning_router)
@@ -53,14 +57,35 @@ app.include_router(api_router)
 @app.on_event("startup")
 def on_startup() -> None:
     setup_logging()
+
+    # 3.1：JWT secret 启动校验
+    if settings.app_env == "production":
+        if not settings.jwt_secret:
+            raise RuntimeError("JWT_SECRET 生产环境必须配置，请设置环境变量")
+        if len(settings.jwt_secret) < 32:
+            raise RuntimeError(
+                f"JWT_SECRET 生产环境密钥长度需 >= 32（当前 {len(settings.jwt_secret)}），请重新生成"
+            )
+    elif not settings.jwt_secret:
+        logger.warning(
+            "jwt_secret 未配置，使用空密钥；请设置 JWT_SECRET 环境变量以确保安全"
+        )
+
     init_db()
-    if settings.llm_provider in {"anthropic", "claude", "claude_code"}:
+
+    # 4.1：LLM provider 启动校验（别名已收敛）
+    valid_providers = {"openai", "anthropic", "volcengine"}
+    if settings.llm_provider and settings.llm_provider not in valid_providers:
+        raise RuntimeError(
+            f"LLM_PROVIDER={settings.llm_provider} 不支持，支持：{', '.join(sorted(valid_providers))}"
+        )
+    if settings.llm_provider == "anthropic":
         base_url = settings.anthropic_base_url or "https://api.anthropic.com"
         has_key = bool(settings.anthropic_api_key)
     elif settings.llm_provider == "openai":
         base_url = settings.openai_base_url or "https://api.openai.com/v1"
         has_key = bool(settings.openai_api_key)
-    elif settings.llm_provider in {"volcengine", "volc", "ark", "huoshan"}:
+    elif settings.llm_provider == "volcengine":
         base_url = settings.volcengine_base_url
         has_key = bool(settings.volcengine_api_key)
     else:

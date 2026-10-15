@@ -9,6 +9,30 @@ from app.core.config import settings
 from app.core.constants import V2_SESSION_SCHEMA_VERSION
 
 
+# 4.2：白名单列名映射。任何动态 SQL 都必须经过这张表校验。
+_SESSION_UPDATABLE_COLUMNS: dict[str, set[str]] = {
+    "interview_sessions": {
+        "status",
+        "workflow_state_json",
+        "evaluation_json",
+        "confirmed_plan_id",
+        "profile_json",
+        "title",
+        "target_role",
+        "resume_id",
+        "configuration_json",
+    },
+    "interview_plans": {"status"},
+    "users": {"quota_remaining", "password_hash", "tier", "subscription_expires_at"},
+}
+
+
+def _assert_known_column(table: str, column: str) -> None:
+    allowed = _SESSION_UPDATABLE_COLUMNS.get(table)
+    if not allowed or column not in allowed:
+        raise ValueError(f"refusing to update non-whitelisted column {table}.{column}")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -118,6 +142,41 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_learning_outcomes_profile
                 ON learning_session_outcomes(user_id, resume_id, target_role, interview_type, completed_at ASC);
+
+            CREATE TABLE IF NOT EXISTS session_locks (
+                session_id TEXT PRIMARY KEY,
+                lock_token TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES interview_sessions(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quota_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                delta INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                session_id TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_quota_audit_user
+                ON quota_audit(user_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS payments (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                package TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL,
+                interviews_granted INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_payments_user_created
+                ON payments(user_id, created_at DESC);
             """
         )
         _ensure_column(conn, "interview_sessions", "resume_id", "TEXT")
@@ -125,6 +184,9 @@ def init_db() -> None:
         _ensure_column(conn, "interview_sessions", "confirmed_plan_id", "TEXT")
         _ensure_column(conn, "interview_sessions", "version", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "messages", "request_id", "TEXT")
+        # v2.2：充值相关列
+        _ensure_column(conn, "users", "tier", "TEXT NOT NULL DEFAULT 'free'")
+        _ensure_column(conn, "users", "subscription_expires_at", "TEXT")
         _ensure_index(
             conn,
             "messages",
@@ -190,17 +252,191 @@ class Store:
             )
             conn.commit()
 
-    def decrement_quota(self, user_id: int) -> dict[str, Any] | None:
-        with get_connection() as conn:
-            row = conn.execute("SELECT quota_remaining FROM users WHERE id = ?", (user_id,)).fetchone()
-            if not row or row["quota_remaining"] <= 0:
-                return None
+    def decrement_quota(
+        self,
+        user_id: int,
+        *,
+        session_id: str | None = None,
+        reason: str = "interview_activate",
+    ) -> dict[str, Any] | None:
+        # 3.4：原子扣减 + 写 audit。任何事务外调用都不安全，但保留
+        # `with_retry` 包装以容忍 "database is locked"。
+        from app.db.transaction import with_retry
+
+        def _do() -> dict[str, Any] | None:
+            with get_connection() as conn:
+                row = conn.execute(
+                    "SELECT quota_remaining FROM users WHERE id = ?", (user_id,),
+                ).fetchone()
+                if not row or row["quota_remaining"] <= 0:
+                    return None
+                conn.execute(
+                    "UPDATE users SET quota_remaining = quota_remaining - 1, updated_at = ? WHERE id = ?",
+                    (_now(), user_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO quota_audit (user_id, delta, reason, session_id, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (user_id, -1, reason, session_id, _now()),
+                )
+                conn.commit()
+                user = self.get_user_by_id(user_id)
+                return user
+
+        return with_retry(_do)
+
+    def compensate_quota(
+        self,
+        user_id: int,
+        *,
+        session_id: str | None = None,
+        reason: str = "interview_activate_rollback",
+    ) -> dict[str, Any] | None:
+        """3.4：补偿 +1。事务外版本，给事务回滚后调用。"""
+        from app.db.transaction import with_retry
+
+        def _do() -> dict[str, Any] | None:
+            with get_connection() as conn:
+                row = conn.execute(
+                    "SELECT quota_remaining FROM users WHERE id = ?", (user_id,),
+                ).fetchone()
+                if not row:
+                    return None
+                conn.execute(
+                    "UPDATE users SET quota_remaining = quota_remaining + 1, updated_at = ? WHERE id = ?",
+                    (_now(), user_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO quota_audit (user_id, delta, reason, session_id, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (user_id, +1, reason, session_id, _now()),
+                )
+                conn.commit()
+                return self.get_user_by_id(user_id)
+
+        return with_retry(_do)
+
+    def audit_outcome_for_session(
+        self, session_id: str, *, reason: str = "auto_compensation"
+    ) -> dict[str, Any] | None:
+        """3.4：发现"已 decrement 但无 outcome"孤儿记录，触发回滚额度。"""
+        from app.db.transaction import with_retry
+
+        def _do() -> dict[str, Any] | None:
+            with get_connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT user_id FROM learning_session_outcomes
+                    WHERE session_id = ? AND deleted_at IS NULL
+                    """,
+                    (session_id,),
+                ).fetchone()
+                if row is not None:
+                    return None
+                audit = conn.execute(
+                    """
+                    SELECT user_id FROM quota_audit
+                    WHERE session_id = ? AND delta = -1
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (session_id,),
+                ).fetchone()
+                if not audit:
+                    return None
+                user_id = int(audit["user_id"])
+                conn.execute(
+                    "UPDATE users SET quota_remaining = quota_remaining + 1, updated_at = ? WHERE id = ?",
+                    (_now(), user_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO quota_audit (user_id, delta, reason, session_id, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (user_id, +1, reason, session_id, _now()),
+                )
+                conn.commit()
+                return self.get_user_by_id(user_id)
+
+        return with_retry(_do)
+
+    def decrement_quota_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        user_id: int,
+        *,
+        session_id: str | None,
+        reason: str,
+    ) -> dict[str, Any] | None:
+        """3.4：事务内原子扣减 + audit。v2.2 订阅有效 → 不扣，仅写一条 0 delta 审计便于追溯。"""
+        row = conn.execute(
+            "SELECT quota_remaining, tier, subscription_expires_at FROM users WHERE id = ?", (user_id,),
+        ).fetchone()
+        if not row:
+            return None
+        # 订阅有效：不扣额度，但写一条 0 delta 审计便于追溯
+        if self.is_subscription_active(dict(row)):
             conn.execute(
-                "UPDATE users SET quota_remaining = quota_remaining - 1, updated_at = ? WHERE id = ?",
-                (_now(), user_id),
+                """
+                INSERT INTO quota_audit (user_id, delta, reason, session_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, 0, f"{reason}:subscription_no_op", session_id, _now()),
             )
-            conn.commit()
-        return self.get_user_by_id(user_id)
+            return None
+        if row["quota_remaining"] <= 0:
+            return None
+        conn.execute(
+            "UPDATE users SET quota_remaining = quota_remaining - 1, updated_at = ? WHERE id = ?",
+            (_now(), user_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO quota_audit (user_id, delta, reason, session_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, -1, reason, session_id, _now()),
+        )
+        return None  # caller 仍可在事务内调用 get_user_by_id 单独读
+
+    def compensate_quota_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        user_id: int,
+        *,
+        session_id: str | None,
+        reason: str,
+    ) -> None:
+        """3.4：事务内 +1 补偿。v2.2 订阅有效 → 不补偿。"""
+        row = conn.execute(
+            "SELECT tier, subscription_expires_at FROM users WHERE id = ?", (user_id,),
+        ).fetchone()
+        if not row:
+            return
+        if self.is_subscription_active(dict(row)):
+            conn.execute(
+                """
+                INSERT INTO quota_audit (user_id, delta, reason, session_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, 0, f"{reason}:subscription_no_op", session_id, _now()),
+            )
+            return
+        conn.execute(
+            "UPDATE users SET quota_remaining = quota_remaining + 1, updated_at = ? WHERE id = ?",
+            (_now(), user_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO quota_audit (user_id, delta, reason, session_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, +1, reason, session_id, _now()),
+        )
 
     def create_planning_session(
         self,
@@ -251,22 +487,16 @@ class Store:
         status: str | None = None,
         confirmed_plan_id: str | None = None,
     ) -> None:
-        assignments: list[str] = ["updated_at = ?"]
-        params: list[Any] = [_now()]
-        if status is not None:
-            assignments.append("status = ?")
-            params.append(status)
-        if confirmed_plan_id is not None:
-            assignments.append("confirmed_plan_id = ?")
-            params.append(confirmed_plan_id)
-        params.append(session_id)
+        # 1.2/4.2：委托到事务版本。
         from app.db.transaction import with_retry
 
         def _do() -> None:
             with get_connection() as conn:
-                conn.execute(
-                    f"UPDATE interview_sessions SET {', '.join(assignments)} WHERE id = ?",
-                    tuple(params),
+                self.update_planning_session_in_conn(
+                    conn,
+                    session_id,
+                    status=status,
+                    confirmed_plan_id=confirmed_plan_id,
                 )
                 conn.commit()
 
@@ -435,29 +665,310 @@ class Store:
         workflow_state: dict[str, Any] | None = None,
         evaluation: dict[str, Any] | None = None,
     ) -> None:
-        assignments: list[str] = ["updated_at = ?", "version = version + 1"]
-        params: list[Any] = [_now()]
-        if status is not None:
-            assignments.append("status = ?")
-            params.append(status)
-        if workflow_state is not None:
-            assignments.append("workflow_state_json = ?")
-            params.append(json.dumps(workflow_state, ensure_ascii=False))
-        if evaluation is not None:
-            assignments.append("evaluation_json = ?")
-            params.append(json.dumps(evaluation, ensure_ascii=False))
-        params.append(session_id)
+        # 1.2/4.2：委托到事务版本。SQL 仍由白名单列名映射构建。
         from app.db.transaction import with_retry
 
         def _do() -> None:
             with get_connection() as conn:
-                conn.execute(
-                    f"UPDATE interview_sessions SET {', '.join(assignments)} WHERE id = ?",
-                    tuple(params),
+                self.update_session_in_conn(
+                    conn,
+                    session_id,
+                    status=status,
+                    workflow_state=workflow_state,
+                    evaluation=evaluation,
                 )
                 conn.commit()
 
         with_retry(_do)
+
+    # 1.2/4.2：事务版本——通过 `conn` 复用同一连接。SQL 仍然由白名单列名映射构建。
+    def _build_session_update(
+        self,
+        *,
+        status: str | None,
+        workflow_state: dict[str, Any] | None,
+        evaluation: dict[str, Any] | None,
+        include_version_bump: bool = True,
+    ) -> tuple[str, list[Any]]:
+        assignments: list[str] = ["updated_at = ?"]
+        params: list[Any] = [_now()]
+        if status is not None:
+            _assert_known_column("interview_sessions", "status")
+            assignments.append("status = ?")
+            params.append(status)
+        if workflow_state is not None:
+            _assert_known_column("interview_sessions", "workflow_state_json")
+            assignments.append("workflow_state_json = ?")
+            params.append(json.dumps(workflow_state, ensure_ascii=False))
+        if evaluation is not None:
+            _assert_known_column("interview_sessions", "evaluation_json")
+            assignments.append("evaluation_json = ?")
+            params.append(json.dumps(evaluation, ensure_ascii=False))
+        if include_version_bump:
+            assignments.append("version = version + 1")
+        sql = "UPDATE interview_sessions SET " + ", ".join(assignments) + " WHERE id = ?"
+        return sql, params
+
+    def update_session_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        *,
+        status: str | None = None,
+        workflow_state: dict[str, Any] | None = None,
+        evaluation: dict[str, Any] | None = None,
+    ) -> None:
+        sql, params = self._build_session_update(
+            status=status, workflow_state=workflow_state, evaluation=evaluation
+        )
+        params.append(session_id)
+        conn.execute(sql, tuple(params))
+
+    def update_planning_session_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        *,
+        status: str | None = None,
+        confirmed_plan_id: str | None = None,
+    ) -> None:
+        assignments: list[str] = ["updated_at = ?"]
+        params: list[Any] = [_now()]
+        if status is not None:
+            _assert_known_column("interview_sessions", "status")
+            assignments.append("status = ?")
+            params.append(status)
+        if confirmed_plan_id is not None:
+            _assert_known_column("interview_sessions", "confirmed_plan_id")
+            assignments.append("confirmed_plan_id = ?")
+            params.append(confirmed_plan_id)
+        params.append(session_id)
+        conn.execute(
+            "UPDATE interview_sessions SET " + ", ".join(assignments) + " WHERE id = ?",
+            tuple(params),
+        )
+
+    def create_interview_plan_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        session_id: str,
+        version: int,
+        status: str,
+        plan_json: dict[str, Any],
+        candidate_summary_json: dict[str, Any],
+        regeneration_strategy: str | None = None,
+        focus_topics: list[str] | None = None,
+        additional_instruction: str | None = None,
+    ) -> dict[str, Any]:
+        plan_id = str(uuid.uuid4())
+        timestamp = _now()
+        conn.execute(
+            """
+            INSERT INTO interview_plans (
+                id, session_id, version, status, plan_json, candidate_summary_json,
+                regeneration_strategy, focus_topics_json, additional_instruction, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                plan_id,
+                session_id,
+                version,
+                status,
+                json.dumps(plan_json, ensure_ascii=False),
+                json.dumps(candidate_summary_json, ensure_ascii=False),
+                regeneration_strategy,
+                json.dumps(focus_topics or [], ensure_ascii=False),
+                additional_instruction,
+                timestamp,
+            ),
+        )
+        return {
+            "id": plan_id,
+            "session_id": session_id,
+            "version": version,
+            "status": status,
+            "plan_json": plan_json,
+            "candidate_summary_json": candidate_summary_json,
+            "regeneration_strategy": regeneration_strategy,
+            "focus_topics": focus_topics or [],
+            "additional_instruction": additional_instruction,
+            "created_at": timestamp,
+        }
+
+    def update_interview_plan_status_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        plan_id: str,
+        *,
+        status: str,
+    ) -> None:
+        _assert_known_column("interview_plans", "status")
+        conn.execute(
+            "UPDATE interview_plans SET status = ? WHERE id = ?", (status, plan_id),
+        )
+
+    def create_message_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        session_id: str,
+        role: str,
+        kind: str,
+        content: str,
+        meta: dict[str, Any] | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """1.2/1.3：事务内写消息。先做 (session_id, request_id) 幂等检查。"""
+        if request_id:
+            row = conn.execute(
+                "SELECT * FROM messages WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+            if row is not None:
+                return {
+                    "id": row["id"],
+                    "session_id": row["session_id"],
+                    "seq": row["seq"],
+                    "role": row["role"],
+                    "kind": row["kind"],
+                    "content": row["content"],
+                    "created_at": row["created_at"],
+                    "meta": _loads(row["meta_json"], {}),
+                }
+        seq_row = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        seq = int(seq_row["max_seq"]) + 1
+        message_id = str(uuid.uuid4())
+        timestamp = _now()
+        conn.execute(
+            """
+            INSERT INTO messages (id, session_id, seq, role, kind, content, created_at, meta_json, request_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                message_id,
+                session_id,
+                seq,
+                role,
+                kind,
+                content,
+                timestamp,
+                json.dumps(meta or {}, ensure_ascii=False),
+                request_id,
+            ),
+        )
+        return {
+            "id": message_id,
+            "session_id": session_id,
+            "seq": seq,
+            "role": role,
+            "kind": kind,
+            "content": content,
+            "created_at": timestamp,
+            "meta": meta or {},
+        }
+
+    def acquire_session_lock(
+        self,
+        session_id: str,
+        *,
+        lock_token: str,
+        ttl_seconds: int,
+    ) -> dict[str, Any] | None:
+        """1.3：分布式锁。返回 {lock_token, expires_at} 或 None（已被他人持有）。
+
+        - 同 token 视为可重入（幂等返回该锁的 expires_at）。
+        - 异 token + 未过期 → None（冲突）。
+        - 异 token + 已过期 → 抢锁成功。
+        """
+        now_ts = _now()
+        # 用 ISO 字符串比较；过期判定：now_ts >= expires_at
+        from datetime import datetime, timezone, timedelta
+
+        now_dt = datetime.now(timezone.utc)
+        expires_at = (now_dt + timedelta(seconds=ttl_seconds)).isoformat()
+
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT lock_token, expires_at FROM session_locks WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO session_locks (session_id, lock_token, expires_at, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (session_id, lock_token, expires_at, now_ts),
+                    )
+                    conn.commit()
+                except sqlite3.IntegrityError:
+                    # 并发：另一个线程抢先 INSERT；视为冲突。
+                    conn.rollback()
+                    fresh = conn.execute(
+                        "SELECT lock_token, expires_at FROM session_locks WHERE session_id = ?",
+                        (session_id,),
+                    ).fetchone()
+                    if fresh is not None:
+                        existing_dt = datetime.fromisoformat(str(fresh["expires_at"]))
+                        remaining = max(0, int((existing_dt - now_dt).total_seconds()))
+                        return {"locked": True, "remaining_seconds": remaining}
+                    return {"locked": True, "remaining_seconds": ttl_seconds}
+                return {"lock_token": lock_token, "expires_at": expires_at}
+            existing_token = str(row["lock_token"])
+            existing_expires = str(row["expires_at"])
+            existing_dt = datetime.fromisoformat(existing_expires)
+            if existing_token == lock_token or existing_dt <= now_dt:
+                conn.execute(
+                    """
+                    UPDATE session_locks
+                    SET lock_token = ?, expires_at = ?, created_at = ?
+                    WHERE session_id = ?
+                    """,
+                    (lock_token, expires_at, now_ts, session_id),
+                )
+                conn.commit()
+                return {"lock_token": lock_token, "expires_at": expires_at}
+            remaining = max(0, int((existing_dt - now_dt).total_seconds()))
+            return {"locked": True, "remaining_seconds": remaining}
+
+    def release_session_lock(self, session_id: str, *, lock_token: str) -> bool:
+        with get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM session_locks WHERE session_id = ? AND lock_token = ?",
+                (session_id, lock_token),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def refresh_session_lock(
+        self, session_id: str, *, lock_token: str, ttl_seconds: int,
+    ) -> bool:
+        with get_connection() as conn:
+            from datetime import datetime, timezone, timedelta
+
+            expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+            cursor = conn.execute(
+                """
+                UPDATE session_locks
+                SET expires_at = ?
+                WHERE session_id = ? AND lock_token = ?
+                """,
+                (expires_at, session_id, lock_token),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_session_lock(self, session_id: str) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM session_locks WHERE session_id = ?", (session_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def list_resumes(self, user_id: int) -> list[dict[str, Any]]:
         with get_connection() as conn:
@@ -485,47 +996,22 @@ class Store:
         meta: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        # A2：若提供了 request_id 且已存在同 session_id+request_id 的消息，直接返回原结果
-        if request_id:
-            existing = self._find_message_by_request_id(session_id, request_id)
-            if existing is not None:
-                return existing
-        with get_connection() as conn:
-            seq_row = conn.execute(
-                "SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
-            seq = int(seq_row["max_seq"]) + 1
-            message_id = str(uuid.uuid4())
-            timestamp = _now()
-            conn.execute(
-                """
-                INSERT INTO messages (id, session_id, seq, role, kind, content, created_at, meta_json, request_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    message_id,
-                    session_id,
-                    seq,
-                    role,
-                    kind,
-                    content,
-                    timestamp,
-                    json.dumps(meta or {}, ensure_ascii=False),
-                    request_id,
-                ),
-            )
-            conn.commit()
-        return {
-            "id": message_id,
-            "session_id": session_id,
-            "seq": seq,
-            "role": role,
-            "kind": kind,
-            "content": content,
-            "created_at": timestamp,
-            "meta": meta or {},
-        }
+        # 1.2/1.3：委托事务版本，避免代码分叉。
+        from app.db.transaction import with_retry
+
+        def _do() -> dict[str, Any]:
+            with get_connection() as conn:
+                return self.create_message_in_conn(
+                    conn,
+                    session_id=session_id,
+                    role=role,
+                    kind=kind,
+                    content=content,
+                    meta=meta,
+                    request_id=request_id,
+                )
+
+        return with_retry(_do)
 
     def find_message_by_request_id(
         self, session_id: str, request_id: str
@@ -777,3 +1263,117 @@ class Store:
             "model_provider": payload.get("model_provider", ""),
             "model_name": payload.get("model_name", ""),
         }
+
+    # ------------------------------------------------------------------
+    # v2.2 充值 (Billing)
+    # ------------------------------------------------------------------
+    def record_payment(
+        self,
+        *,
+        payment_id: str,
+        user_id: int,
+        package: str,
+        amount_cents: int,
+        interviews_granted: int,
+        status: str,
+    ) -> dict[str, Any]:
+        """记录一笔支付（mock 也走审计表）。"""
+        timestamp = _now()
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO payments (
+                    id, user_id, package, amount_cents, interviews_granted,
+                    status, created_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payment_id,
+                    user_id,
+                    package,
+                    amount_cents,
+                    interviews_granted,
+                    status,
+                    timestamp,
+                    timestamp if status == "succeeded" else None,
+                ),
+            )
+            conn.commit()
+        return self.get_payment(payment_id)
+
+    def get_payment(self, payment_id: str) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_payments_for_user(self, user_id: int) -> list[dict[str, Any]]:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def apply_payment_to_user(
+        self,
+        *,
+        user_id: int,
+        package: str,
+        interviews_granted: int,
+        subscription_expires_at: str | None,
+    ) -> dict[str, Any] | None:
+        """单事务内：更新用户 tier / quota / subscription_expires_at。
+        `package == 'subscription'` 写到 subscription_expires_at；
+        `package == 'single'` 把 quota_remaining += interviews_granted 并把 tier 升级为 paid。
+        """
+        from app.db.transaction import with_retry
+
+        def _do() -> dict[str, Any] | None:
+            with get_connection() as conn:
+                row = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+                if not row:
+                    return None
+                if package == "subscription":
+                    conn.execute(
+                        """
+                        UPDATE users SET tier = 'subscription',
+                                         subscription_expires_at = ?,
+                                         updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (subscription_expires_at, _now(), user_id),
+                    )
+                else:  # single
+                    conn.execute(
+                        """
+                        UPDATE users SET tier = CASE WHEN tier = 'subscription' THEN tier ELSE 'paid' END,
+                                         quota_remaining = quota_remaining + ?,
+                                         updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (interviews_granted, _now(), user_id),
+                    )
+                conn.commit()
+            return self.get_user_by_id(user_id)
+
+        return with_retry(_do)
+
+    def is_subscription_active(self, user: dict[str, Any]) -> bool:
+        """判断用户是否处于有效订阅期。"""
+        if user.get("tier") != "subscription":
+            return False
+        expires_at = user.get("subscription_expires_at")
+        if not expires_at:
+            return False
+        try:
+            # expires_at 形如 2026-11-15T00:00:00+00:00
+            ts = expires_at.replace("Z", "+00:00")
+            return datetime.fromisoformat(ts) > datetime.now(timezone.utc)
+        except (ValueError, TypeError):
+            return False
+
+    def effective_quota_remaining(self, user: dict[str, Any]) -> int:
+        """订阅有效 → 大数；否则取 quota_remaining。"""
+        if self.is_subscription_active(user):
+            return 10_000
+        return int(user.get("quota_remaining", 0))

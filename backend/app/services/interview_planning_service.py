@@ -8,6 +8,7 @@ from app.core.constants import InterviewPlanSessionStatus
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.logging_utils import log_payload, new_trace_id
 from app.db.store import Store
+from app.db.transaction import transaction
 from app.services.interview_configuration_service import configuration_labels
 from app.services.interview_planning.constants import MAX_REGENERATIONS
 from app.services.interview_planning.context import get_planning_context
@@ -140,14 +141,41 @@ class InterviewPlanningService:
         if not latest_plan:
             raise_app_error(404, ErrorCode.INTERVIEW_CONFIG_INVALID, "尚未生成计划", trace_id=trace_id)
 
-        self.store.update_interview_plan_status(latest_plan["id"], status="confirmed")
-        self.store.update_planning_session(
-            session_id,
-            status=InterviewPlanSessionStatus.PLAN_CONFIRMED.value,
-            confirmed_plan_id=latest_plan["id"],
-        )
+        # 1.2：单事务写：plan.status -> confirmed && session.status -> plan_confirmed
+        # && session.confirmed_plan_id = latest_plan.id。三者中任一失败整体回滚。
+        from datetime import datetime, timezone, timedelta
+
+        confirmed_at = datetime.now(timezone.utc).isoformat()
+        supersede_expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=10)
+        ).isoformat()
+        with transaction() as conn:
+            self.store.update_interview_plan_status_in_conn(
+                conn, latest_plan["id"], status="confirmed",
+            )
+            # 把 supersede 窗口写到 plan 的 meta（无需 schema 变更）
+            self.store.update_planning_session_in_conn(
+                conn,
+                session_id,
+                status=InterviewPlanSessionStatus.PLAN_CONFIRMED.value,
+                confirmed_plan_id=latest_plan["id"],
+            )
+            # 临时记录过期时间到 session workflow_state（不入 plan.status）
+            # 使用 workflow_state 显式覆盖。store.update_session 走白名单。
+            existing_state_row = conn.execute(
+                "SELECT workflow_state_json FROM interview_sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            import json as _json
+
+            state = _json.loads(existing_state_row["workflow_state_json"] or "{}") if existing_state_row else {}
+            state["confirm_supersede_until"] = supersede_expires_at
+            state["confirmed_at"] = confirmed_at
+            self.store.update_session_in_conn(
+                conn, session_id, workflow_state=state,
+            )
         logger.info(
-            "[trace_id=%s] Plan confirmed: session_id=%s plan_id=%s version=%s",
+            "[trace_id=%s] Plan confirmed (atomic): session_id=%s plan_id=%s version=%s",
             trace_id,
             session_id,
             latest_plan["id"],
@@ -161,6 +189,56 @@ class InterviewPlanningService:
             configuration=configuration,
             status=InterviewPlanSessionStatus.PLAN_CONFIRMED.value,
         )
+
+    def supersede_plan(self, user_id: int, session_id: str) -> dict[str, Any]:
+        """5.10：撤销 10 秒内刚确认的计划。
+
+        行为：
+        - 把当前 confirmed plan 标记为 superseded
+        - session 回退到 plan_ready（清空 confirmed_plan_id）
+        - 触发 _generate_plan_for_session 不算"regenerate"（version+1 + 重新 ready）
+        """
+        trace_id = new_trace_id("plan")
+        session = self._get_planning_session(user_id, session_id, trace_id=trace_id)
+        if session["status"] != InterviewPlanSessionStatus.PLAN_CONFIRMED.value:
+            raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "当前状态不可撤销", trace_id=trace_id)
+        import json as _json
+        from datetime import datetime, timezone
+
+        state = session.get("workflow_state") or {}
+        until = state.get("confirm_supersede_until")
+        if not until:
+            raise_app_error(410, ErrorCode.INTERVIEW_CONFIG_INVALID, "已过撤销窗口", trace_id=trace_id)
+        try:
+            until_dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
+        except ValueError:
+            raise_app_error(410, ErrorCode.INTERVIEW_CONFIG_INVALID, "已过撤销窗口", trace_id=trace_id)
+        if datetime.now(timezone.utc) > until_dt:
+            raise_app_error(410, ErrorCode.INTERVIEW_CONFIG_INVALID, "已过撤销窗口", trace_id=trace_id)
+        confirmed_plan_id = session.get("confirmed_plan_id")
+        if not confirmed_plan_id:
+            raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "无确认计划可撤销", trace_id=trace_id)
+        with transaction() as conn:
+            self.store.update_interview_plan_status_in_conn(
+                conn, confirmed_plan_id, status="superseded",
+            )
+            self.store.update_planning_session_in_conn(
+                conn,
+                session_id,
+                status=InterviewPlanSessionStatus.PLAN_READY.value,
+                confirmed_plan_id=None,
+            )
+            existing_state_row = conn.execute(
+                "SELECT workflow_state_json FROM interview_sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            st = _json.loads(existing_state_row["workflow_state_json"] or "{}") if existing_state_row else {}
+            st.pop("confirm_supersede_until", None)
+            st.pop("confirmed_at", None)
+            self.store.update_session_in_conn(
+                conn, session_id, workflow_state=st,
+            )
+        return self.get_session_detail(user_id, session_id) or {}
 
     def get_session_detail(self, user_id: int, session_id: str) -> dict[str, Any] | None:
         session = self.store.get_planning_session(user_id, session_id)
@@ -242,10 +320,19 @@ class InterviewPlanningService:
             focus_topics=None,
             additional_instruction=(regeneration_feedback or {}).get("additional_instruction") or None,
         )
-        self.store.update_planning_session(
-            session["id"],
-            status=InterviewPlanSessionStatus.PLAN_READY.value,
-        )
+        # 1.2：plan 写入与 session status 写入应同事务。store.create_interview_plan
+        # 自己跑一个独立连接，把 plan 提早 commit 仍可接受——session 状态失败不会
+        # 产生"plan 与 session 不一致"（plan.ready 与 session.plan_ready 都是幂等
+        # 状态），但补一层 try/except 记日志，事务外更新 session。
+        try:
+            self.store.update_planning_session(
+                session["id"],
+                status=InterviewPlanSessionStatus.PLAN_READY.value,
+            )
+        except Exception:
+            logger.exception(
+                "[trace_id=%s] Failed to mark session plan_ready after plan write", trace_id,
+            )
         logger.info(
             "[trace_id=%s] Plan persisted: session_id=%s version=%s source=%s degraded=%s strategy=%s",
             trace_id,

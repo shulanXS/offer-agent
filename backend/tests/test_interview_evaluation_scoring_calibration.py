@@ -90,7 +90,8 @@ def test_partial_with_positive_evidence_scores_higher_than_negative_only() -> No
         runtime_state={"completed_topic_ids": ["topic-1"]},
     )
     assert competencies[0]["score"] is not None
-    assert competencies[0]["score"] >= 2
+    # 域 2：score 改为 float 后，有正向证据的 partial 应明显高于全负面 partial（≈1.0）
+    assert competencies[0]["score"] > 1.0
 
 
 def test_resolve_competency_status_label_by_score() -> None:

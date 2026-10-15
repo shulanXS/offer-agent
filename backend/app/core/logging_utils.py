@@ -17,6 +17,16 @@ _CN_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 _CN_ID_RE = re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)")
 _BANK_CARD_RE = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
 
+# 3.2：敏感字段黑名单（命中后整个值替换为占位）
+_DENY_FIELDS: frozenset[str] = frozenset({
+    "resume_text",
+    "jd_text",
+    "content",
+    "prompt",
+    "system_prompt",
+    "opening_question",
+})
+
 
 def redact_pii(text: str) -> str:
     """对文本中的 PII 做最小化脱敏。"""
@@ -27,6 +37,34 @@ def redact_pii(text: str) -> str:
     text = _CN_ID_RE.sub("<id_card>", text)
     text = _BANK_CARD_RE.sub("<bank_card>", text)
     return text
+
+
+def _redact_payload_recursive(value: Any, depth: int = 0) -> Any:
+    """3.2：递归脱敏。
+    
+    - 命中 _DENY_FIELDS 的字段：整体替换为 `<redacted len=N>`。
+    - 字符串值：走 redact_pii。
+    - 列表/字典：递归处理。
+    - 有长度限制防止深递归攻击。
+    """
+    if depth > 10:
+        return "<max_depth>"
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for k, v in value.items():
+            if k in _DENY_FIELDS:
+                if isinstance(v, str):
+                    result[k] = f"<redacted len={len(v)}>"
+                else:
+                    result[k] = f"<redacted>"
+            else:
+                result[k] = _redact_payload_recursive(v, depth + 1)
+        return result
+    if isinstance(value, list):
+        return [_redact_payload_recursive(item, depth + 1) for item in value]
+    if isinstance(value, str):
+        return redact_pii(value)
+    return value
 
 
 def setup_logging() -> None:
@@ -68,15 +106,16 @@ def log_payload(
 
 
 def _serialize_payload(payload: Any) -> str:
-    if isinstance(payload, str):
-        content = payload
+    # 3.2：先递归脱敏，再序列化（避免 nested dict 里的敏感字段整段写日志）
+    safe_payload = _redact_payload_recursive(payload)
+    if isinstance(safe_payload, str):
+        content = safe_payload
     else:
         try:
-            content = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+            content = json.dumps(safe_payload, ensure_ascii=False, indent=2, default=str)
         except TypeError:
-            content = str(payload)
-    # C1：脱敏 + 截断
-    content = redact_pii(content)
+            content = str(safe_payload)
+    # C1：截断
     if settings.log_payload_max_chars > 0 and len(content) > settings.log_payload_max_chars:
         return f"{content[:settings.log_payload_max_chars]}\n... [truncated]"
     return content

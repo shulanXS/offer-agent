@@ -1,7 +1,6 @@
 """v1.1 F4: 计划生成失败可重试 — API 返回结构化 retryable_error，前端可换模型。"""
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest

@@ -26,7 +26,7 @@ HTTPBearer 提取令牌，JWT 解码校验签名和过期时间，再由 sub 查
 
 认证通过只说明“你是谁”，不说明“这个 session_id 属于你”。服务调用 Store 时使用 user_id 与资源 ID 查询，简历引用同样要核对归属。UUID 复杂难猜只能降低猜测机会，不能代替授权。
 
-密码采用带随机盐的 PBKDF2-HMAC-SHA256，验证使用恒定时间比较。不能写成 bcrypt。JWT 签名不加密载荷，令牌中不应放入需要保密的简历原文。生产配置还需要替换默认签名密钥，详见第 11 章。
+密码采用 argon2 哈希（v1 阶段使用 PBKDF2-HMAC-SHA256，老用户登录成功后惰性 rehash 升级）。验证使用恒定时间比较。JWT 签名不加密载荷，令牌中不应放入需要保密的简历原文。生产配置还需要替换默认签名密钥，详见第 11 章。**v2.2 起**：注册和登录入口对 `username` 做 `strip().lower()` 归一，规避大小写差异导致的"同账号进不去"问题；schema 加 `_no_blank` field validator 拒绝纯空白 username/password。
 
 ## 3. 数据表怎样对应业务
 
@@ -63,6 +63,41 @@ reply_in_progress 在运行态中记录处理状态，可以拦截后到的常�
 会话按用户和更新时间查询，消息按会话和 seq 排序，计划按会话与版本查询，学习结果按档案维度查询，现有索引对应这些访问模式。
 
 启动时 init_db 创建缺失表并补充部分字段，是轻量初始化方式，不等于完整迁移系统。正式演进需要版本化迁移、旧 JSON schema 兼容、备份及失败恢复。更换数据库或扩容前，应先明确这些需求。
+
+## 8. v2.2：充值与算法题（mock 支付 + LLM judge）
+
+**充值（`/api/billing/*`）**
+
+- `GET /api/billing/packages` — 返回两个档位（`single` ¥20/5 次、`subscription` ¥200/30 天）+ 当前用户 tier/quota/subscription_expires_at
+- `POST /api/billing/recharge` body `{package: 'single' | 'subscription'}` — 走 mock 支付：写 `payments` 审计表 + 事务内更新 `users.tier`/`quota_remaining`/`subscription_expires_at`
+- `GET /api/billing/history` — 当前用户充值流水
+
+**users 表新增列**：`tier`（free / paid / subscription）、`subscription_expires_at`（nullable）。**payments 表（新增）**：审计每一笔 mock 交易，PK 为 `id` 字符串，FK 到 `users.id`。
+
+**订阅豁免额度**：`decrement_quota_in_conn` / `compensate_quota_in_conn` 在事务内先调 `is_subscription_active(user)`：订阅有效 → 写 0 delta 审计，不扣 quota；否则走原 quota 路径。`is_subscription_active` 比较 `subscription_expires_at` 与 `datetime.now(timezone.utc)`，显式 UTC 避免漂移。
+
+**新用户免费额度**：`register` 时显式设 `quota_remaining = settings.new_user_free_quota`（默认 1），`tier = 'free'`。老用户 grandfather：`init_db` 时不强制改 quota_remaining，仅在缺失 `tier` 列时补默认值。
+
+**算法题（`/api/algorithm/*`）**
+
+- `GET /api/algorithm/problems` — 题库摘要列表（不返回 hidden_tests）
+- `GET /api/algorithm/problems/{id}` — 单题详情
+- `POST /api/algorithm/judge` body `{problem_id, code, language}` — 调用 LLM 模拟执行 + 评分；评分维度 correctness / efficiency / style / edge_cases（1-5）+ 整体 overall；解析失败时 `verdict=unparsed` 兜底而非 500
+
+**算法分数不持久化到 messages.meta_json**，避免污染面试对话流；只在 live page 侧边栏展示当前回合结果。
+
+## 9. v2.2：面试配置扩展
+
+`POST /api/interviews` 入参在 v2.2 新增：
+
+- `duration_minutes: Literal[15, 30, 45, 60] = 45` — 替代写死 45，激活时按此计算 `deadline_at`
+- `include_algorithm: bool = False` — 标记本场是否含算法回合
+- `custom_target_role: str | None` — 当 `target_role='__custom__'` 时必填
+- `focus_topics` 上限从 6 提到 8（`MAX_FOCUS_TOPICS`）
+
+`target_role` 枚举从 4 个扩展到 9 个（+ `data_ml` / `mobile` / `qa` / `sre` / `embedded` / `__custom__`）；`INTERVIEW_TYPES` 加 `intern`（实习）；`LANGUAGES` 在 schema 仍保留（兼容老数据），但前端 UI 已移除 `language` 字段让用户选择 LLM 输出的目标语种（v1.1 的 `interview_language` 字段独立保留，仍按 session 维度控制 LLM 输出语言）。
+
+`GET /api/interview-options` 返回新增 `duration_minutes_options` / `include_algorithm_supported` / `focus_topics_recommended`，前端用这些字段驱动配置页。
 
 ## 核对与自测
 

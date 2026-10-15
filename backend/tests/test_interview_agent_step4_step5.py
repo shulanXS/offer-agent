@@ -143,7 +143,9 @@ def test_past_deadline_forces_finish() -> None:
 
     detail = client.get(f"/api/interviews/{session_id}", headers=headers).json()
     assert detail["status"] == "evaluating"
-    assert "时间" in detail["messages"][-1]["content"] or "结束" in detail["messages"][-1]["content"]
+    last_content = detail["messages"][-1]["content"].lower()
+    # v3 i18n: 接受中/英任一表达。
+    assert any(token in last_content for token in ("时间", "结束", "time", "ended", "ended."))
 
 
 def test_user_finish_interview() -> None:
@@ -155,7 +157,9 @@ def test_user_finish_interview() -> None:
     assert finished.status_code == 200
     payload = finished.json()
     assert payload["status"] == "evaluating"
-    assert "主动结束" in payload["messages"][-1]["content"]
+    # v3 i18n: 接受中/英任一表达。
+    last_content = payload["messages"][-1]["content"].lower()
+    assert any(token in last_content for token in ("主动结束", "ended the mock", "ended early"))
 
     blocked = client.post(
         f"/api/interviews/{session_id}/reply/stream",
@@ -191,6 +195,7 @@ def test_duplicate_reply_rejected() -> None:
     client.post(f"/api/interviews/{session_id}/activate", headers=headers)
 
     store = Store()
+    user_id = client.get("/api/auth/me", headers=headers).json()["id"]
     record = store.get_interview_session_record(user_id, session_id)
     runtime_state = dict(record["workflow_state"])
     current_topic_id = str(runtime_state.get("current_topic_id", ""))
@@ -201,8 +206,10 @@ def test_duplicate_reply_rejected() -> None:
         content="正在处理中的回答",
         meta={"topic_id": current_topic_id},
     )
-    runtime_state["reply_in_progress"] = True
-    store.update_session(session_id, workflow_state=runtime_state)
+    # v3 1.3：session_locks 取代 workflow_state.reply_in_progress。
+    store.acquire_session_lock(
+        session_id, lock_token="held-by-other", ttl_seconds=300,
+    )
 
     blocked = client.post(
         f"/api/interviews/{session_id}/reply/stream",
@@ -242,17 +249,16 @@ def test_topic_probe_limit_advances(monkeypatch) -> None:
 def test_get_session_clears_stale_reply_lock(monkeypatch) -> None:
     monkeypatch.setattr("app.core.config.settings.interview_stale_reply_lock_seconds", 0)
 
+def test_get_session_clears_stale_reply_lock() -> None:
     headers = _auth_headers()
     session_id, _ = _create_confirmed_session(headers)
-    user_id = client.get("/api/auth/me", headers=headers).json()["id"]
 
     client.post(f"/api/interviews/{session_id}/activate", headers=headers)
 
-    store = Store()
-    record = store.get_interview_session_record(user_id, session_id)
-    runtime_state = dict(record["workflow_state"])
-    runtime_state["reply_in_progress"] = True
-    store.update_session(session_id, workflow_state=runtime_state)
+    # v3 1.3：session_locks 取代 workflow_state.reply_in_progress。锁永远由
+    # service 主动 release 或 DB 过期清理；get 不再"启发式清理"。测试改为
+    # "无 lock 时 is_reply_processing = False"。
+    assert Store().get_session_lock(session_id) is None
 
     detail = client.get(f"/api/interviews/{session_id}", headers=headers).json()
     assert detail["progress"]["is_reply_processing"] is False
@@ -270,11 +276,8 @@ def test_get_session_clears_reply_lock_when_assistant_already_replied() -> None:
         json={"content": "我负责订单系统后端开发，使用 Java 和 Spring。"},
     )
 
-    store = Store()
-    record = store.get_interview_session_record(user_id, session_id)
-    runtime_state = dict(record["workflow_state"])
-    runtime_state["reply_in_progress"] = True
-    store.update_session(session_id, workflow_state=runtime_state)
+    # v3 1.3：reply 完成后 service 主动 release_session_lock，DB 中不应有 lock。
+    assert Store().get_session_lock(session_id) is None
 
     detail = client.get(f"/api/interviews/{session_id}", headers=headers).json()
     assert detail["progress"]["is_reply_processing"] is False

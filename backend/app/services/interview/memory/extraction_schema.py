@@ -1,6 +1,7 @@
 """Evidence 提取结果校验（05 小步 2）。"""
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -112,12 +113,49 @@ def validate_extraction_result(
     }, stats
 
 
+def _split_sentences(text: str) -> list[str]:
+    """把 answer 切成句子（中英文标点都吃）。用于 evidence 句级匹配。"""
+    if not text:
+        return []
+    text = str(text)
+    # 中英文终止标点都吃；句号 . 也参与切分（避免英文长句被整体命中）
+    pieces: list[str] = []
+    buf: list[str] = []
+    for ch in text:
+        if ch in "。！？!?；;\n.":
+            if buf:
+                pieces.append("".join(buf))
+                buf = []
+            continue
+        buf.append(ch)
+    if buf:
+        pieces.append("".join(buf))
+    return [p for p in (s.strip() for s in pieces) if p]
+
+
+_SENTENCE_CACHE: dict[str, tuple[float, list[str]]] = {}
+
+
+def _cached_sentences(latest_answer: str) -> list[str]:
+    """切句结果缓存 1 秒（同一轮 LLM 多次调用复用）。"""
+    now = time.time()
+    cached = _SENTENCE_CACHE.get(latest_answer)
+    if cached and (now - cached[0]) < 1.0:
+        return cached[1]
+    sentences = _split_sentences(latest_answer)
+    _SENTENCE_CACHE[latest_answer] = (now, sentences)
+    return sentences
+
+
 def quote_in_latest_answer(quote: str, latest_answer: str) -> bool:
+    """2.2：句级匹配。quote 必须完整出现在 latest_answer 的某一句里（normalize 后）。"""
     normalized_quote = _normalize_text(quote)
-    normalized_answer = _normalize_text(latest_answer)
-    if not normalized_quote or not normalized_answer:
+    if not normalized_quote or not latest_answer:
         return False
-    return normalized_quote in normalized_answer
+    for sentence in _cached_sentences(latest_answer):
+        if normalized_quote in _normalize_text(sentence):
+            return True
+    return False
 
 
 def _normalize_claim(
@@ -219,15 +257,13 @@ def _normalize_contradiction(item: Any, *, current_topic_id: str, latest_answer:
 
 
 def _content_grounded_in_answer(content: str, latest_answer: str) -> bool:
+    """2.2：句级匹配。content 必须完整出现在某一句里（不再做"前一半字符串匹配"）。"""
     normalized_content = _normalize_text(content)
-    normalized_answer = _normalize_text(latest_answer)
-    if not normalized_content or not normalized_answer:
+    if not normalized_content or not latest_answer:
         return False
-    if normalized_content in normalized_answer:
-        return True
-    if len(normalized_content) >= 6:
-        fragment = normalized_content[: max(6, len(normalized_content) // 2)]
-        return fragment in normalized_answer
+    for sentence in _cached_sentences(latest_answer):
+        if normalized_content in _normalize_text(sentence):
+            return True
     return False
 
 

@@ -1,23 +1,39 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=24)
     password: str = Field(min_length=6, max_length=64)
 
+    @field_validator("username", "password")
+    @classmethod
+    def _no_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("must not be blank")
+        return v
+
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=3, max_length=24)
     password: str = Field(min_length=6, max_length=64)
+
+    @field_validator("username", "password")
+    @classmethod
+    def _no_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("must not be blank")
+        return v
 
 
 class UserProfile(BaseModel):
     id: int
     username: str
     quota_remaining: int
+    tier: str = "free"
+    subscription_expires_at: str | None = None
 
 
 class AuthResponse(BaseModel):
@@ -80,6 +96,9 @@ class InterviewOptionsResponse(BaseModel):
     languages: list[InterviewOption]
     target_levels: list[InterviewOption]
     duration_minutes: int
+    duration_minutes_options: list[int] = Field(default_factory=list)
+    include_algorithm_supported: bool = False
     max_focus_topics: int
+    focus_topics_recommended: list[InterviewOption] = Field(default_factory=list)
 
 

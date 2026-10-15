@@ -21,6 +21,7 @@ import {
   type ResumeCardItem,
 } from './utils/resume'
 import { getStoredToken, registerUnauthorizedHandler, setStoredToken } from './services/client'
+import i18n from './i18n'
 import './App.css'
 
 export default function App() {
@@ -107,7 +108,7 @@ function AppRoutes() {
       setToken(response.access_token)
       setUser(response.user)
       setPassword('')
-      setNotice(authMode === 'login' ? '登录成功' : '注册成功，已自动登录')
+      setNotice(i18n.t(`auth:notice_${authMode}`))
 
       const returnPath = `${location.pathname}${location.search}`
       if (returnPath.startsWith('/interviews/')) {
@@ -140,7 +141,7 @@ function AppRoutes() {
   async function handleResumeUpload(file: File | null) {
     if (!file) return
     if (resumes.filter((resume) => resume.parse_status === 'ready').length >= MAX_RESUME_COUNT) {
-      setError(`最多保留 ${MAX_RESUME_COUNT} 份简历，请先删除不需要的简历。`)
+      setError(i18n.t('resumes:max_count_error', { max: MAX_RESUME_COUNT }))
       return
     }
 
@@ -250,5 +251,13 @@ function AppRoutes() {
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : '请求失败'
+  if (error instanceof Error) return error.message
+  // 后端错误码优先
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = String((error as { code?: string }).code ?? '')
+    if (code) {
+      return i18n.t(`errors:${code}`, { defaultValue: '' }) || code
+    }
+  }
+  return i18n.t('common:request_failed')
 }

@@ -7,7 +7,8 @@ client = TestClient(app)
 
 
 def test_interview_options_returns_fixed_enums() -> None:
-    response = client.get("/api/interview-options")
+    # v1.1: 显式传 Accept-Language=zh，因为默认 fallback 是 en
+    response = client.get("/api/interview-options", headers={"Accept-Language": "zh"})
 
     assert response.status_code == 200
     payload = response.json()

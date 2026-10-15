@@ -21,6 +21,7 @@ def decide_node(state: InterviewReplyState) -> InterviewReplyState:
         has_next_topic=bool(state.get("has_next_topic")),
         memory_context=state.get("memory_context") or {},
         trace_id=state.get("trace_id", ""),
+        interview_language=state.get("interview_language") or "en",
     )
     if raw_decision.get("_verify_contradiction"):
         runtime_state["contradiction_verification_used"] = True

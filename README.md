@@ -31,6 +31,18 @@
 - 跨场次学习（部分）：评估页「与上一场对比」等
 - SSE 流式输出与会话持久化
 
+## v1.1 新增能力
+
+- **中英文 UI 切换**（侧栏 `EN | 中文`），i18n 词条覆盖全 7 个 page + 8 个 evaluation 子组件
+- **面试语言独立配置**：在创建面试时选择 `interview_language = en | zh`，与 UI 语言解耦；评估报告、计划生成、面试追问均按 `interview_language` 输出
+- **后端双语 options**：`GET /api/interview-options` 按 `Accept-Language: en|zh` 返回对应 `label`
+- **SSE 流式重连与心跳**：`consumeEventStream` 用 `AbortController`，15s 心跳 + `X-Request-Id` 重放
+- **离开页面冻结计时**：`POST /api/interviews/{id}/pause` + `/{id}/resume`，`useInterviewPauseResume` hook 监听 `visibilitychange`
+- **计划生成失败可重试**：`PlanGenerationRetryableError` 全局 handler，前端可展示「换个模型重试」按钮（响应字段 `retryable_error.retryable`）
+- **LLM 流式并发安全**：`LLMStreamPatcher` 用 `contextvars.ContextVar` 隔离每请求的 delta queue，无串扰
+
+详见 [`改进方案.md`](改进方案.md) §13。
+
 ## 启动
 
 默认前端 `http://localhost:5173`，后端 `http://localhost:8000`。
@@ -95,6 +107,28 @@ pytest
 ```
 
 CI 使用 `FailingLLMClient` 验证降级路径，不依赖真实模型 Key。
+
+### v1.1 验收测试
+
+```bash
+cd backend
+.venv/bin/python -m pytest \
+  tests/test_plan_retryable_error.py \
+  tests/test_interview_planning.py \
+  tests/test_planning_validator.py \
+  tests/test_planning_pipeline_optimizations.py \
+  tests/test_planning_prompts.py \
+  tests/test_interview_configuration.py \
+  tests/test_interview_memory_step1.py \
+  tests/test_interview_memory_step2.py \
+  tests/test_interview_memory_step3.py \
+  tests/test_interview_memory_step4.py \
+  tests/test_interview_evaluation_step1.py \
+  tests/test_interview_evaluation_step2_unit.py
+# 期望 65 passed
+
+cd ../frontend && npm run build  # 期望 0 TS 错误
+```
 
 ## 说明
 

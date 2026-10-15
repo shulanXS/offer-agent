@@ -110,6 +110,8 @@ class InterviewEvaluationService:
             runtime_state=runtime_state,
             messages=record.get("messages") or [],
         )
+        # v1.1: 报告语言跟随 interview_language
+        report_language = str(record.get("configuration", {}).get("interview_language") or "en")
         try:
             return build_evidence_driven_report(
                 plan_json=plan_record["plan_json"],
@@ -117,6 +119,7 @@ class InterviewEvaluationService:
                 runtime_state=runtime_state,
                 evaluation_context=evaluation_context,
                 trace_id=trace_id,
+                language=report_language,
             )
         except Exception as exc:
             logger.warning(
@@ -130,6 +133,7 @@ class InterviewEvaluationService:
                     configuration=record["configuration"],
                     runtime_state=runtime_state,
                     evaluation_context=evaluation_context,
+                    language=report_language,
                 )
                 # B1：降级报告 schema 显式标注
                 if isinstance(minimal, dict):

@@ -38,6 +38,7 @@ def build_evidence_driven_report(
     evaluation_context: dict[str, Any],
     trace_id: str = "",
     use_agent: bool = True,
+    language: str = "en",
 ) -> dict[str, Any]:
     competencies = derive_competencies(
         plan_json=plan_json,
@@ -142,6 +143,7 @@ def build_evidence_driven_report(
     return {
         "version": EVALUATION_REPORT_VERSION,
         "source": source,
+        "report_language": language,
         "summary": summary,
         "candidate_review": candidate_review,
         "overall_score": overall_score,

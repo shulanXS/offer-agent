@@ -38,7 +38,6 @@ export type {
   InterviewListDisplayLabel,
   InterviewSessionListItem,
 } from './interviewSessionList'
-export { INTERVIEW_LIST_LABELS } from './interviewSessionList'
 export type { ResumeExtractResponse, ResumeSummary } from './resume'
 export type {
   LearningContextResponse,

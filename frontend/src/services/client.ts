@@ -1,3 +1,4 @@
+import i18n from '@/i18n'
 import type { StreamEvent } from '@/types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -82,18 +83,18 @@ export async function requestJson<T>(
       // C4：401 自动清 token
       handleUnauthorized()
       const payload = await safeJson(response)
-      throw new Error(readApiErrorMessage(payload) ?? '登录已失效，请重新登录')
+      throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:unauthorized'))
     }
 
     if (!response.ok) {
       const payload = await safeJson(response)
-      throw new Error(readApiErrorMessage(payload) ?? '请求失败')
+      throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:request_failed'))
     }
 
     return (await response.json()) as T
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('请求超时，请稍后重试')
+      throw new Error(i18n.t('common:request_timeout'))
     }
     throw error
   } finally {
@@ -113,12 +114,12 @@ export async function requestFormData<T>(path: string, formData: FormData, token
   if (response.status === 401) {
     handleUnauthorized()
     const payload = await safeJson(response)
-    throw new Error(readApiErrorMessage(payload) ?? '登录已失效，请重新登录')
+    throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:unauthorized'))
   }
 
   if (!response.ok) {
     const payload = await safeJson(response)
-    throw new Error(readApiErrorMessage(payload) ?? '请求失败')
+    throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:request_failed'))
   }
 
   return (await response.json()) as T
@@ -130,11 +131,11 @@ export async function consumeEventStream(response: Response, onEvent: (event: St
       handleUnauthorized()
     }
     const payload = await safeJson(response)
-    throw new Error(readApiErrorMessage(payload) ?? '流式请求失败')
+    throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:stream_failed'))
   }
 
   if (!response.body) {
-    throw new Error('浏览器不支持当前流式能力')
+    throw new Error(i18n.t('common:stream_unsupported'))
   }
 
   const reader = response.body.getReader()
@@ -209,14 +210,14 @@ function readApiErrorMessage(payload: ApiErrorPayload | null): string | null {
       .map((item) => {
         if (!item || typeof item !== 'object') return null
         const entry = item as Record<string, unknown>
-        const field = typeof entry.field === 'string' ? entry.field : Array.isArray(entry.loc) ? entry.loc.slice(1).join('.') : '字段'
+        const field = typeof entry.field === 'string' ? entry.field : Array.isArray(entry.loc) ? entry.loc.slice(1).join('.') : ''
         const message =
-          typeof entry.message === 'string' ? entry.message : typeof entry.msg === 'string' ? entry.msg : '参数校验失败'
-        return `${field || '字段'}: ${message}`
+          typeof entry.message === 'string' ? entry.message : typeof entry.msg === 'string' ? entry.msg : ''
+        return field ? `${field}: ${message}` : message
       })
       .filter((item): item is string => Boolean(item))
     if (messages.length > 0) {
-      return messages.join('；')
+      return messages.join('; ')
     }
   }
 

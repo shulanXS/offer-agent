@@ -2,6 +2,7 @@ import { LoadingOverlay } from '@/components/LoadingOverlay'
 import { Label } from '@/components/ui/label'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import {
   REGENERATION_STRATEGIES,
@@ -29,6 +30,8 @@ export function RegeneratePlanDialog({
   onConfirm,
   onCancel,
 }: RegeneratePlanDialogProps) {
+  const { t } = useTranslation('plans')
+  const { t: tc } = useTranslation('common')
   const hasJd = Boolean(configuration.jd_text?.trim())
   const strategyOptions = useMemo(
     () => REGENERATION_STRATEGIES.filter((item) => !('requiresJd' in item && item.requiresJd) || hasJd),
@@ -73,13 +76,13 @@ export function RegeneratePlanDialog({
   }
 
   if (loading) {
-    return <LoadingOverlay open message="正在重新生成面试计划，请耐心等待" />
+    return <LoadingOverlay open message={t('btn_regenerating')} />
   }
 
   const remainingHint =
     regenerationsRemaining <= 1
-      ? '这是最后一次重新生成机会，确认计划后将无法再调整。'
-      : `本次重新生成后，还可调整 ${regenerationsRemaining - 1} 次（当前剩余 ${regenerationsRemaining} 次）。`
+      ? 'Last attempt: after this you cannot adjust further.'
+      : `After this, you can adjust ${regenerationsRemaining - 1} more time(s). (Remaining: ${regenerationsRemaining})`
 
   function handleConfirm() {
     onConfirm({
@@ -90,13 +93,13 @@ export function RegeneratePlanDialog({
 
   return createPortal(
     <div className="confirm-dialog-root" role="presentation">
-      <button type="button" className="confirm-dialog-backdrop" aria-label="关闭" disabled={loading} onClick={onCancel} />
+      <button type="button" className="confirm-dialog-backdrop" aria-label={tc('close')} disabled={loading} onClick={onCancel} />
       <div className="v2-regenerate-dialog" role="dialog" aria-modal="true" aria-labelledby="regenerate-dialog-title">
-        <h3 id="regenerate-dialog-title">重新生成面试计划</h3>
+        <h3 id="regenerate-dialog-title">{t('regenerate_title')}</h3>
         <p className="v2-regenerate-remaining-hint">{remainingHint}</p>
 
         <div className="v2-regenerate-section">
-          <Label>调整策略（必选）</Label>
+          <Label>{t('regenerate_strategy')}</Label>
           <div className="v2-regenerate-strategies">
             {strategyOptions.map((option) => (
               <button
@@ -114,14 +117,14 @@ export function RegeneratePlanDialog({
 
         {strategy === 'different_plan' ? (
           <div className="v2-regenerate-section">
-            <Label htmlFor="regenerate-instruction">补充说明（可选，最多 200 字）</Label>
+            <Label htmlFor="regenerate-instruction">{t('regenerate_additional_label')}</Label>
             <textarea
               id="regenerate-instruction"
               className="v2-jd-textarea"
               maxLength={200}
               value={additionalInstruction}
               disabled={loading}
-              placeholder="例如：希望更偏分布式经验，少问管理类问题"
+              placeholder="e.g. focus on distributed systems, skip management questions"
               onChange={(event) => setAdditionalInstruction(event.target.value)}
             />
           </div>
@@ -129,10 +132,10 @@ export function RegeneratePlanDialog({
 
         <div className="confirm-dialog-actions">
           <button type="button" className="ghost" disabled={loading} onClick={onCancel}>
-            取消
+            {tc('cancel')}
           </button>
           <button type="button" className="primary" disabled={loading} onClick={handleConfirm}>
-            确定
+            {tc('confirm')}
           </button>
         </div>
       </div>

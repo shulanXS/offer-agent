@@ -1,9 +1,10 @@
-"""Interview Decide / Act Prompt 模板。"""
+"""Interview Decide / Act Prompt 模板。v1.1: 中英双版。"""
 from __future__ import annotations
 
-DECIDE_SYSTEM_PROMPT = "你是面试决策助手，只能返回 JSON，不要输出 Markdown 或解释。"
 
-DECIDE_PROMPT = """
+# === 中文版本（v1.0 兼容）===
+DECIDE_SYSTEM_PROMPT_ZH = "你是面试决策助手，只能返回 JSON，不要输出 Markdown 或解释。"
+DECIDE_PROMPT_ZH = """
 你是专业面试官的决策模块。根据当前主题计划、对话、工作记忆与最新回答，选择下一步动作。
 
 当前主题：
@@ -56,9 +57,8 @@ increase_difficulty, decrease_difficulty, next_topic, finish
 }}
 """
 
-ACT_SYSTEM_PROMPT = "你是专业面试官，只能返回 JSON，不要输出解释、Markdown 或评分。称呼候选人用「你」，不要用「您」。"
-
-ACT_PROMPT = """
+ACT_SYSTEM_PROMPT_ZH = "你是专业面试官，只能返回 JSON，不要输出解释、Markdown 或评分。称呼候选人用「你」，不要用「您」。"
+ACT_PROMPT_ZH = """
 请根据已确定的决策，生成一句自然、口语化的追问或切题话术。
 
 面试类型：{interview_label}
@@ -89,3 +89,113 @@ ACT_PROMPT = """
 决策 action 为 next_topic 时，下一主题 opening 参考：
 {next_opening_question}
 """
+
+
+# === 英文版本（v1.1 新增）===
+DECIDE_SYSTEM_PROMPT_EN = "You are the interview decision module. Return JSON only. No markdown, no explanations."
+DECIDE_PROMPT_EN = """
+You are the decision module of a professional interviewer. Based on the current topic plan, conversation, working memory, and the latest answer, choose the next action.
+
+Current topic:
+- id: {topic_id}
+- name: {topic_name}
+- objective: {objective}
+- dimension: {dimension}
+- focus_points: {focus_points}
+- expected_signals: {expected_signals}
+- probe_strategies: {probe_strategies}
+
+Working memory (current topic):
+- Covered signals: {covered_signals}
+- Missing information:
+{missing_information}
+- Recent evidence:
+{recent_evidence_summary}
+- Pending contradictions (treat as risk only; do not conclude):
+{pending_contradictions}
+
+Completed topic summaries:
+{topic_summaries}
+
+Current topic recent conversation:
+{conversation_history}
+
+Latest answer:
+{latest_answer}
+
+Allowed actions:
+probe_detail, probe_ownership, probe_metric, probe_tradeoff, probe_risk,
+increase_difficulty, decrease_difficulty, next_topic, finish
+
+Rules:
+1. Return JSON only. Do NOT produce full candidate-facing questions.
+2. Prefer probe_* based on missing_information; expected_information should reuse the missing signal text.
+3. Do not reuse already-covered signals as expected_information.
+4. Trigger at most one probe_* clarification for a pending contradiction; never finish or accuse.
+5. When gaps are filled and there is enough evidence, pick next_topic; if there is no next topic, pick finish.
+6. reason and expected_information must align with the current topic's objective.
+7. should_change_topic is true only when action is next_topic or finish.
+
+Return shape:
+{{
+  "action": "probe_ownership",
+  "target_topic_id": "{topic_id}",
+  "reason": "Candidate has not yet stated their individual contribution",
+  "expected_information": ["Own responsibility", "Outcome verification"],
+  "should_change_topic": false
+}}
+"""
+
+ACT_SYSTEM_PROMPT_EN = "You are a professional interviewer. Return JSON only. No explanations, markdown, or scoring. Address the candidate directly as 'you'."
+ACT_PROMPT_EN = """
+Generate one natural, conversational follow-up or transition line based on the decided action.
+
+Interview type: {interview_label}
+Current topic: {topic_name}
+Objective: {objective}
+Action: {action}
+Reason: {reason}
+Expected information: {expected_information}
+Target signal: {target_signal}
+Previous action: {last_action}
+
+Current topic recent conversation:
+{conversation_history}
+
+Latest answer:
+{latest_answer}
+
+Requirements:
+1. Return JSON only: {{"message": "..."}}
+2. Ask one question at a time, 40-120 words.
+3. Use casual 'you' (not formal 'sir/madam'); keep the mock-interview tone.
+4. For probe_*/increase_difficulty/decrease_difficulty: acknowledge the latest answer in one short sentence (summarize or confirm), then ask one new question aligned with the target signal / action.
+5. Reference the latest answer by default; do not jump back to the opening. Do not fabricate 'you mentioned X' unless X is in the latest answer or the candidate's earlier turns.
+6. If the target signal changes (e.g. ownership → metric), show that the previous question was heard before transitioning.
+7. Stay aligned with the current topic objective.
+8. For action=next_topic: briefly acknowledge the latest answer, then naturally introduce the next topic.
+
+When action is next_topic, suggested opening for the next topic:
+{next_opening_question}
+"""
+
+
+def get_decide_prompts(language: str) -> tuple[str, str]:
+    """返回 (system, user) prompt。"""
+    if language == "zh":
+        return DECIDE_SYSTEM_PROMPT_ZH, DECIDE_PROMPT_ZH
+    return DECIDE_SYSTEM_PROMPT_EN, DECIDE_PROMPT_EN
+
+
+def get_act_prompts(language: str) -> tuple[str, str]:
+    if language == "zh":
+        return ACT_SYSTEM_PROMPT_ZH, ACT_PROMPT_ZH
+    return ACT_SYSTEM_PROMPT_EN, ACT_PROMPT_EN
+
+
+# 向后兼容：原 DECIDE_SYSTEM_PROMPT/DECIDE_PROMPT/ACT_SYSTEM_PROMPT/ACT_PROMPT
+# 仍指向中文版，避免其它模块导入断裂
+DECIDE_SYSTEM_PROMPT = DECIDE_SYSTEM_PROMPT_ZH
+DECIDE_PROMPT = DECIDE_PROMPT_ZH
+ACT_SYSTEM_PROMPT = ACT_SYSTEM_PROMPT_ZH
+ACT_PROMPT = ACT_PROMPT_ZH

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import threading
+import contextvars
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional
 
@@ -15,6 +15,13 @@ class ReplyOutcome:
     runtime_state: dict[str, Any]
     next_status: str
     decision: dict[str, Any]
+
+
+# v1.1: 用 ContextVar 持有当前请求的 patcher（替代 monkey-patch）
+# 避免并发请求之间串扰 delta_queue。
+_current_patcher: contextvars.ContextVar[Optional["LLMStreamPatcher"]] = contextvars.ContextVar(
+    "current_llm_stream_patcher", default=None
+)
 
 
 class InterviewReplyHandler:
@@ -98,7 +105,7 @@ class InterviewReplyHandler:
         patcher = None
         if delta_queue is not None:
             patcher = LLMStreamPatcher(delta_queue=delta_queue, collected=collected_deltas)
-            patcher.apply()
+            patcher.enter()
 
         try:
             loop = asyncio.get_event_loop()
@@ -108,7 +115,7 @@ class InterviewReplyHandler:
             )
         finally:
             if patcher is not None:
-                patcher.revert()
+                patcher.exit()
 
         return ReplyOutcome(
             assistant_content=str(result["assistant_content"]),
@@ -121,45 +128,36 @@ class InterviewReplyHandler:
 
 
 class LLMStreamPatcher:
-    """A3 helper：把 LLMClient.generate_text 临时替换为流式切片。
+    """A3 helper (v1.1 改造)：通过 ContextVar 把 LLM 切片行为注入到 LLM client。
 
-    - 仅在 `supports_streaming()` 返回 true 的 client 上生效
-    - 把 generate_text 的结果按 4 字符一组切片（cjk 友好），每片推 queue
-    - 不替换 provider 代码，回退到 generate_text
+    替代 v1.0 的"monkey-patch 类方法"，避免并发请求时 delta_queue 串扰。
+    - `enter()`：把当前 patcher 写入 ContextVar
+    - `exit()`：从 ContextVar 移除
+    - LLM client 内部读取 ContextVar 决定是否切片
     """
 
     def __init__(self, *, delta_queue: "asyncio.Queue[str]", collected: list[str]) -> None:
         self._queue = delta_queue
         self._collected = collected
-        self._originals: dict[type, Any] = {}
+        self._token: contextvars.Token | None = None
 
-    def apply(self) -> None:
-        # 收集所有可能注入的 LLM client 单例
-        from app.llm.factory import LangChainLLMClient
-        self._LangChainLLMClient = LangChainLLMClient
-        original_generate_text = LangChainLLMClient.generate_text
-        self._originals[LangChainLLMClient] = original_generate_text
-        LangChainLLMClient.generate_text = self._wrap_generate_text(original_generate_text)  # type: ignore[assignment]
+    def enter(self) -> None:
+        self._token = _current_patcher.set(self)
 
-    def revert(self) -> None:
-        for cls, fn in self._originals.items():
-            cls.generate_text = fn  # type: ignore[assignment]
-        self._originals.clear()
+    def exit(self) -> None:
+        if self._token is not None:
+            try:
+                _current_patcher.reset(self._token)
+            except (ValueError, LookupError):
+                _current_patcher.set(None)
+            self._token = None
 
-    def _wrap_generate_text(self, original: Any) -> Any:
-        queue = self._queue
-        collected = self._collected
+    def enqueue_chunks(self, text: str) -> None:
+        _enqueue_chunks_sync(self._queue, text, self._collected)
 
-        def patched(self_client: Any, prompt: str, system_prompt: str | None = None, **kwargs: Any) -> str:
-            supports = getattr(self_client, "supports_streaming", lambda: False)()
-            if not supports:
-                return original(self_client, prompt, system_prompt, **kwargs)
-            # 同步转异步：先调 generate_text 拿全量，再切片推 queue
-            text = original(self_client, prompt, system_prompt, **kwargs)
-            _enqueue_chunks_sync(queue, text, collected)
-            return text
-
-        return patched
+    @staticmethod
+    def current() -> Optional["LLMStreamPatcher"]:
+        return _current_patcher.get()
 
 
 def _enqueue_chunks_sync(queue: "asyncio.Queue[str]", text: str, collected: list[str]) -> None:

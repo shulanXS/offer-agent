@@ -42,6 +42,70 @@ class InterviewAgentService:
         record = self._reconcile_reply_lock(record)
         return self._serialize_live(record, start_clock=True)
 
+    def pause_interview(self, user_id: int, session_id: str) -> dict[str, Any]:
+        """v1.1: 离开页面冻结面试计时。记录 paused_at；不消耗额度、不改状态。"""
+        record = self._get_session_record(user_id, session_id)
+        if record["status"] != "active":
+            return {
+                "session_id": session_id,
+                "paused": False,
+                "reason": f"status_{record['status']}",
+                "remaining_seconds": None,
+            }
+        runtime_state = dict(record.get("workflow_state") or {})
+        if not runtime_state.get("paused_at"):
+            runtime_state["paused_at"] = datetime.now(timezone.utc).isoformat()
+            self.store.update_session(session_id, workflow_state=runtime_state)
+        remaining = self._compute_remaining_seconds(runtime_state)
+        return {
+            "session_id": session_id,
+            "paused": True,
+            "paused_at": runtime_state.get("paused_at"),
+            "remaining_seconds": remaining,
+        }
+
+    def resume_interview(self, user_id: int, session_id: str) -> dict[str, Any]:
+        """v1.1: 回到页面恢复面试计时。累计 paused 区间，remaining_seconds 跳过。"""
+        record = self._get_session_record(user_id, session_id)
+        runtime_state = dict(record.get("workflow_state") or {})
+        paused_at = runtime_state.get("paused_at")
+        if paused_at:
+            try:
+                start = datetime.fromisoformat(str(paused_at).replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                delta = max(0, int((now - start).total_seconds()))
+            except Exception:
+                delta = 0
+            if delta > 0:
+                runtime_state["total_paused_seconds"] = int(runtime_state.get("total_paused_seconds") or 0) + delta
+            runtime_state.pop("paused_at", None)
+            self.store.update_session(session_id, workflow_state=runtime_state)
+        remaining = self._compute_remaining_seconds(runtime_state)
+        return {
+            "session_id": session_id,
+            "paused": False,
+            "total_paused_seconds": runtime_state.get("total_paused_seconds", 0),
+            "remaining_seconds": remaining,
+        }
+
+    def _compute_remaining_seconds(self, runtime_state: dict[str, Any]) -> int | None:
+        """v1.1: 用 workflow_state 算 remaining_seconds，已减 total_paused_seconds。"""
+        from app.services.interview.boundaries import remaining_seconds
+        deadline = str(runtime_state.get("deadline_at") or "")
+        rest = remaining_seconds(deadline)
+        if rest is None:
+            return None
+        paused = int(runtime_state.get("total_paused_seconds") or 0)
+        # 当前若正 paused，再加实时 paused 区间
+        if runtime_state.get("paused_at"):
+            try:
+                start = datetime.fromisoformat(str(runtime_state["paused_at"]).replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                paused += max(0, int((now - start).total_seconds()))
+            except Exception:
+                pass
+        return max(0, rest - paused)
+
     def activate_interview(self, user_id: int, session_id: str) -> dict[str, Any]:
         record = self._get_session_record(user_id, session_id)
         trace_id = new_trace_id("interview")

@@ -4,13 +4,17 @@ import { CandidateAvatar, InterviewerAvatar } from '@/components/InterviewAvatar
 import { LoadingOverlay } from '@/components/LoadingOverlay'
 import { useInterviewOptions } from '@/hooks/useInterviewConfiguration'
 import { useActivateLiveInterview, useFinishLiveInterview, useLiveInterviewSession } from '@/hooks/useInterviewLive'
+import { useInterviewPauseResume } from '@/hooks/useInterviewPauseResume'
 import { evaluateInterview } from '@/services/interviewEvaluation'
 import { replyLiveInterviewStream } from '@/services/interviewLive'
+import { bcp47ForIntl } from '@/i18n/useLocale'
+import i18n from '@/i18n'
 import type { ChatMessage, StreamEvent } from '@/types'
 import { isLiveInterviewSession, type LiveInterviewSessionDetail } from '@/types/interviewLive'
 import { BarChart3, BriefcaseBusiness, Clock3, LoaderCircle, MessageSquare, SendHorizonal } from 'lucide-react'
 import { TypewriterStream } from '@/utils/typewriterStream'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 interface InterviewLivePageProps {
@@ -18,6 +22,8 @@ interface InterviewLivePageProps {
 }
 
 export function InterviewLivePage({ token }: InterviewLivePageProps) {
+  const { t } = useTranslation('interview')
+  const { t: tc } = useTranslation('common')
   const { sessionId = '' } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -38,7 +44,15 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
   const [pendingAutoFinish, setPendingAutoFinish] = useState(false)
   const [showEvalGeneratingOverlay, setShowEvalGeneratingOverlay] = useState(false)
+  const replyAbortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+
+  // v1.1: 离开/回到页面时冻结/恢复面试计时
+  useInterviewPauseResume({
+    sessionId,
+    token,
+    enabled: Boolean(sessionId) && sessionStatus === 'active',
+  })
   const autoFinishTriggeredRef = useRef(false)
   const postFinishTriggeredRef = useRef(false)
 
@@ -250,11 +264,22 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
       setMessages((prev) => prev.map((item) => (item.id === targetId ? { ...item, content } : item)))
     })
     let finalAssistantMessage: ChatMessage | null = null
+    const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const controller = new AbortController()
+    replyAbortRef.current = controller
 
     try {
-      await replyLiveInterviewStream(token, sessionId, content, (event: StreamEvent) => {
+      await replyLiveInterviewStream(
+        token,
+        sessionId,
+        content,
+        (event: StreamEvent) => {
         if (event.event === 'error') {
-          const message = typeof event.data.message === 'string' ? event.data.message : '回复失败，请刷新页面后重试'
+          const code = (event.data as { code?: string })?.code
+          const message =
+            (typeof event.data.message === 'string' && event.data.message) ||
+            (code ? i18n.t(`errors:${code}`, { defaultValue: '' }) : '') ||
+            i18n.t('errors:INTERVIEW_REPLY_FAILED')
           throw new Error(message)
         }
         if (event.event === 'session_state') {
@@ -299,7 +324,13 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
             setSessionStatus(nextStatus as LiveInterviewSessionDetail['status'])
           }
         }
-      })
+      },
+        {
+          requestId,
+          signal: controller.signal,
+          retryOnError: true,
+        },
+      )
       await typewriter.waitForIdle()
       if (finalAssistantMessage) {
         setMessages((prev) =>
@@ -329,8 +360,8 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
       <div className="v2-live-page">
         <header className="v2-live-header">
           <div className="v2-live-header-title-row">
-            <h2>模拟面试</h2>
-            <p className="v2-live-header-subtitle">正在加载会话…</p>
+            <h2>{t('live_title')}</h2>
+            <p className="v2-live-header-subtitle">{t('live_loading')}</p>
           </div>
         </header>
       </div>
@@ -342,7 +373,7 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
       <header className="v2-live-header">
         <div className="v2-live-header-top">
           <div className="v2-live-header-title-row">
-            <h2>模拟面试</h2>
+            <h2>{t('live_title')}</h2>
             <p className="v2-live-header-subtitle">{headerSubtitle}</p>
           </div>
           {!needsActivate && !isFinished ? (
@@ -353,19 +384,19 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
               onClick={() => setShowFinishConfirm(true)}
             >
               <Clock3 size={16} />
-              结束面试
+              {t('live_end_btn')}
             </button>
           ) : null}
         </div>
 
         {!needsActivate ? (
-          <div className="v2-live-header-meta" aria-label="面试状态">
+          <div className="v2-live-header-meta" aria-label="Interview status">
             <div className="v2-live-meta-item">
               <span className="v2-live-meta-icon" aria-hidden="true">
                 <BriefcaseBusiness size={18} />
               </span>
               <div>
-                <span className="v2-live-meta-label">当前职位</span>
+                <span className="v2-live-meta-label">{t('live_meta_role')}</span>
                 <strong>{roleLabel || sessionTitle || '—'}</strong>
               </div>
             </div>
@@ -374,7 +405,7 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
                 <BarChart3 size={18} />
               </span>
               <div>
-                <span className="v2-live-meta-label">面试进度</span>
+                <span className="v2-live-meta-label">{t('live_topic_progress')}</span>
                 <strong>{topicProgressLabel}</strong>
               </div>
             </div>
@@ -383,7 +414,7 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
                 <Clock3 size={18} />
               </span>
               <div>
-                <span className="v2-live-meta-label">剩余时间</span>
+                <span className="v2-live-meta-label">{t('live_remaining')}</span>
                 <strong
                   className={`v2-live-countdown ${progress?.is_wrap_up_zone || remainingSeconds === 0 ? 'v2-live-remaining-warning' : ''}`}
                 >
@@ -402,21 +433,21 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
           {isStartingInterview ? (
             <>
               <LoaderCircle className="v2-spin" size={28} />
-              <h3>正在启动面试</h3>
-              <p>正在生成首题，请稍候…</p>
+              <h3>{tc('loading')}</h3>
+              <p>{t('live_loading')}</p>
             </>
           ) : (
             <>
               <MessageSquare size={28} />
-              <h3>准备开始正式面试</h3>
-              <p>将基于已锁定计划按考察方向依次提问。若刚从计划页进入，请返回计划页点击「确认并开始面试」以预生成首题。</p>
+              <h3>{t('live_activate_btn')}</h3>
+              <p>{t('live_subtitle')}</p>
               <div className="v2-live-start-actions">
                 <button type="button" className="v2-text-button" onClick={() => navigate(`/interviews/${sessionId}/plan`)}>
-                  返回计划
+                  {tc('back')}
                 </button>
                 {showManualStartButton ? (
                   <button type="button" className="v2-btn-confirm" onClick={() => void handleActivate()}>
-                    开始面试
+                    {t('live_activate_btn')}
                   </button>
                 ) : null}
               </div>
@@ -426,7 +457,7 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
       ) : (
         <section className="v2-live-layout">
           <div className="v2-live-topic-bar">
-            <span className="v2-live-topic-bar-label">当前主题</span>
+            <span className="v2-live-topic-bar-label">{t('live_current_topic')}</span>
             <span className="v2-live-topic-tag">{progress?.current_topic_name || '—'}</span>
           </div>
           <Card className="v2-panel v2-live-chat">
@@ -440,7 +471,7 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
                       <InterviewerAvatar />
                       <div className="v2-live-streaming-copy">
                         <LoaderCircle className="v2-spin" size={16} />
-                        面试官正在组织下一题…
+                        {t('live_typing')}
                       </div>
                     </div>
                   </div>
@@ -450,11 +481,11 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
 
               {isFinished ? (
                 <div className="v2-live-finished">
-                  <p>{reviewMode ? '对话记录只读查看。' : '本场面试已结束。'}</p>
+                  <p>{t('live_status_completed')}</p>
                   <div className="v2-live-start-actions">
                     {!reviewMode && sessionStatus === 'evaluating' ? (
                       <button type="button" className="v2-btn-confirm" onClick={() => navigate('/interviews')}>
-                        去面试记录
+                        Records
                       </button>
                     ) : null}
                     {sessionStatus === 'completed' ? (
@@ -463,11 +494,11 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
                         className="v2-btn-confirm"
                         onClick={() => navigate(`/interviews/${sessionId}/evaluation`)}
                       >
-                        查看评估报告
+                        Evaluation
                       </button>
                     ) : null}
                     <button type="button" className="v2-text-button" onClick={() => navigate(`/interviews/${sessionId}/plan`)}>
-                      返回计划页
+                      {tc('back')}
                     </button>
                   </div>
                 </div>
@@ -475,17 +506,17 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
                 <form className="v2-live-composer" onSubmit={handleSubmit}>
                   <textarea
                     value={draft}
-                    placeholder="输入你的回答..."
+                    placeholder={t('live_composer_placeholder')}
                     rows={4}
                     disabled={!canReply}
                     onChange={(event) => setDraft(event.target.value)}
                     onKeyDown={handleComposerKeyDown}
                   />
                   <div className="v2-live-composer-footer">
-                    <span className="v2-live-composer-hint">Enter 发送，Shift + Enter 换行</span>
+                    <span className="v2-live-composer-hint">Enter ↵</span>
                     <button type="submit" className="v2-btn-confirm v2-live-send-btn" disabled={!canReply || !draft.trim()}>
                       <SendHorizonal size={16} />
-                      发送
+                      {t('live_send')}
                     </button>
                   </div>
                 </form>
@@ -496,10 +527,10 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
 
       <ConfirmDialog
         open={showFinishConfirm}
-        title="确认结束面试？"
-        description="结束后将无法继续回答。系统会保存当前进度并进入评估状态。"
-        confirmLabel="结束面试"
-        cancelLabel="继续面试"
+        title={t('live_finish_confirm_title')}
+        description={t('live_finish_confirm_body')}
+        confirmLabel={t('live_end_btn')}
+        cancelLabel={t('live_send')}
         loading={finishMutation.isPending}
         danger
         onConfirm={handleFinishConfirm}
@@ -508,7 +539,7 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
 
       <LoadingOverlay
         open={showEvalGeneratingOverlay}
-        message="正在生成评估报告，请稍后去面试记录页查看"
+        message={t('live_eval_overlay')}
         hideLabel
       />
     </div>
@@ -516,8 +547,14 @@ export function InterviewLivePage({ token }: InterviewLivePageProps) {
 }
 
 function InterviewMessage({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation('interview')
   const isAssistant = message.role === 'assistant'
-  const displayName = isAssistant ? '面试官' : '你'
+  const displayName = isAssistant ? t('live_send') /* interviewer label fallback */ : t('live_send')
+  // 简单 label：assistant 显示 Interviewer/面试官，user 显示 You/你
+  const interviewerLabel = (i18n.language || 'en').startsWith('zh') ? '面试官' : 'Interviewer'
+  const youLabel = (i18n.language || 'en').startsWith('zh') ? '你' : 'You'
+  const finalName = isAssistant ? interviewerLabel : youLabel
+  void displayName // keep
   const timestamp = formatMessageTime(message.created_at)
   const Avatar = isAssistant ? InterviewerAvatar : CandidateAvatar
 
@@ -526,7 +563,7 @@ function InterviewMessage({ message }: { message: ChatMessage }) {
       <div className="v2-live-thread-head">
         <Avatar />
         <div className="v2-live-thread-meta">
-          <strong>{displayName}</strong>
+          <strong>{finalName}</strong>
           {timestamp ? <time dateTime={message.created_at}>{timestamp}</time> : null}
         </div>
       </div>
@@ -563,7 +600,13 @@ function formatMessageTime(value: string) {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  const locale = (i18n.language || 'en').startsWith('zh') ? 'zh-CN' : 'en-US'
+  return date.toLocaleTimeString(bcp47ForIntl(locale === 'zh-CN' ? 'zh' : 'en'), {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
 }
 
 function readError(error: unknown) {

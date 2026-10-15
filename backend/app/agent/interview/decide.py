@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.agent.interview.prompts import DECIDE_PROMPT, DECIDE_SYSTEM_PROMPT
+from app.agent.interview.prompts import get_decide_prompts
 from app.agent.interview.rule_fallback import build_rule_fallback_decision
 from app.core.config import settings
 from app.llm.factory import create_llm_client
@@ -18,7 +18,6 @@ from app.services.interview.memory.decide_support import (
 
 logger = logging.getLogger("uvicorn.error")
 
-
 class InterviewDecideAgent:
     def decide(
         self,
@@ -31,9 +30,11 @@ class InterviewDecideAgent:
         has_next_topic: bool,
         memory_context: dict[str, Any] | None = None,
         trace_id: str = "",
+        interview_language: str = "en",
     ) -> dict[str, Any]:
         client = create_llm_client(settings.llm_provider, settings.llm_model)
-        prompt = DECIDE_PROMPT.format(
+        system_prompt, user_prompt = get_decide_prompts(interview_language)
+        prompt = user_prompt.format(
             topic_id=topic.get("id", ""),
             topic_name=topic.get("name", ""),
             objective=topic.get("objective", ""),
@@ -45,14 +46,14 @@ class InterviewDecideAgent:
             missing_information=format_missing_information(memory_context),
             recent_evidence_summary=format_recent_evidence_summary(memory_context),
             pending_contradictions=format_contradictions(memory_context),
-            topic_summaries=_format_topic_summaries(topic_summaries),
-            conversation_history=_format_conversation_history(topic_messages),
+            topic_summaries=_format_topic_summaries(topic_summaries, interview_language),
+            conversation_history=_format_conversation_history(topic_messages, interview_language),
             latest_answer=latest_answer,
         )
         try:
             payload = client.generate_json(
                 prompt,
-                DECIDE_SYSTEM_PROMPT,
+                system_prompt,
                 operation_name="interview_decide",
                 trace_id=trace_id,
             )
@@ -69,7 +70,11 @@ class InterviewDecideAgent:
         )
 
 
-def _format_conversation_history(messages: list[dict[str, Any]]) -> str:
+def _format_conversation_history(messages: list[dict[str, Any]], language: str = "en") -> str:
+    is_zh = language == "zh"
+    interviewer_label = "面试官" if is_zh else "Interviewer"
+    candidate_label = "候选人" if is_zh else "Candidate"
+    empty_text = "（暂无对话）" if is_zh else "(no conversation yet)"
     lines: list[str] = []
     for message in messages:
         role = message.get("role")
@@ -77,13 +82,13 @@ def _format_conversation_history(messages: list[dict[str, Any]]) -> str:
         if not content:
             continue
         if role == "assistant":
-            lines.append(f"面试官: {content}")
+            lines.append(f"{interviewer_label}: {content}")
         elif role == "user":
-            lines.append(f"候选人: {content}")
-    return "\n".join(lines) or "（暂无对话）"
+            lines.append(f"{candidate_label}: {content}")
+    return "\n".join(lines) or empty_text
 
 
-def _format_topic_summaries(topic_summaries: dict[str, Any]) -> str:
+def _format_topic_summaries(topic_summaries: dict[str, Any], language: str = "en") -> str:
     if not topic_summaries:
-        return "（尚无已完成主题）"
+        return "（尚无已完成主题）" if language == "zh" else "(no completed topic yet)"
     return "\n".join(f"- {key}: {value}" for key, value in topic_summaries.items())

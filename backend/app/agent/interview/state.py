@@ -27,6 +27,8 @@ class InterviewReplyState(TypedDict, total=False):
     assistant_kind: str
     assistant_meta: dict[str, Any]
     next_status: str
+    # v1.1: 面试语言（en|zh），由 configuration.interview_language 注入
+    interview_language: str
 
 
 def build_interview_reply_state(
@@ -40,6 +42,8 @@ def build_interview_reply_state(
     all_messages: list[dict[str, Any]],
     latest_answer: str,
 ) -> InterviewReplyState:
+    # v1.1: 透传 interview_language 到 graph state
+    interview_language = str(configuration.get("interview_language") or "en")
     return {
         "trace_id": trace_id,
         "plan_json": plan_json,
@@ -49,4 +53,5 @@ def build_interview_reply_state(
         "current_topic": current_topic,
         "all_messages": all_messages,
         "latest_answer": latest_answer,
+        "interview_language": interview_language,
     }

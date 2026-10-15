@@ -2,6 +2,8 @@
 import { Card } from '@/components/ui/card'
 import { AlertTriangle, ThumbsUp } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { EvaluationFeedbackEntry } from '@/types/interviewEvaluation'
 import {
   HIGHLIGHT_ITEM_ICONS,
@@ -16,27 +18,28 @@ export function FeedbackSection({
   highlights: EvaluationFeedbackEntry[]
   weaknesses: EvaluationFeedbackEntry[]
 }) {
+  const { t } = useTranslation('evaluation')
   return (
     <section className="v2-eval-zone v2-eval-session-feedback-zone">
       <Card className="v2-panel v2-eval-session-feedback-panel">
         <div className="v2-eval-session-feedback-panel-head">
-          <h3>本次反馈</h3>
-          <p>基于本次面试表现，总结你的优势与不足，帮助你有针对性地提升。</p>
+          <h3>{t('feedback_title')}</h3>
+          <p>{t('section_overview')}</p>
         </div>
         <div className="v2-eval-session-feedback-columns">
           <Column
             icon={<ThumbsUp size={18} />}
-            title="回答中的亮点"
+            title={t('section_strengths')}
             items={highlights}
-            empty="暂无亮点。"
+            empty="—"
             tone="highlight"
             itemIcons={HIGHLIGHT_ITEM_ICONS}
           />
           <Column
             icon={<AlertTriangle size={18} />}
-            title="主要不足"
+            title={t('section_risks')}
             items={weaknesses}
-            empty="暂无主要不足。"
+            empty="—"
             tone="weakness"
             itemIcons={WEAKNESS_ITEM_ICONS}
           />
@@ -54,7 +57,7 @@ function Column({
   tone,
   itemIcons,
 }: {
-  icon: JSX.Element
+  icon: ReactNode
   title: string
   items: EvaluationFeedbackEntry[]
   empty: string

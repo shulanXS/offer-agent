@@ -1,11 +1,9 @@
-import asyncio
-
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.core.errors import ErrorCode, raise_app_error
-from app.core.rate_limit import limiter, LLM_LIMIT, UPLOAD_LIMIT
+from app.core.rate_limit import limiter, LLM_LIMIT
 from app.core.streaming import SSE_RESPONSE_HEADERS
 from app.schemas import ReplyInterviewRequest
 from app.schemas.interview_plan import (
@@ -59,18 +57,19 @@ def get_interview(session_id: str, current_user: dict = Depends(get_current_user
 
 @router.post("/{session_id}/plan/generate", response_model=InterviewPlanPreviewResponse)
 @limiter.limit(LLM_LIMIT)
-def generate_interview_plan(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+def generate_interview_plan(request: Request, session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
     return planning_service.generate_plan(current_user["id"], session_id)
 
 
 @router.post("/{session_id}/plan/regenerate", response_model=InterviewPlanPreviewResponse)
 @limiter.limit(LLM_LIMIT)
 def regenerate_interview_plan(
+    request: Request,
     session_id: str,
-    request: RegeneratePlanRequest,
+    request_body: RegeneratePlanRequest,
     current_user: dict = Depends(get_current_user),
 ) -> dict:
-    return planning_service.regenerate_plan(current_user["id"], session_id, request.model_dump())
+    return planning_service.regenerate_plan(current_user["id"], session_id, request_body.model_dump())
 
 
 @router.post("/{session_id}/plan/confirm", response_model=InterviewPlanPreviewResponse)
@@ -80,7 +79,7 @@ def confirm_interview_plan(session_id: str, current_user: dict = Depends(get_cur
 
 @router.post("/{session_id}/evaluate", response_model=EvaluateInterviewResponse)
 @limiter.limit(LLM_LIMIT)
-def evaluate_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+def evaluate_interview(request: Request, session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
     return evaluation_service.evaluate_interview(current_user["id"], session_id)
 
 
@@ -108,11 +107,26 @@ def activate_interview(session_id: str, current_user: dict = Depends(get_current
     return interview_agent_service.activate_interview(current_user["id"], session_id)
 
 
+@router.post("/{session_id}/pause")
+def pause_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    """v1.1: 离开页面冻结面试计时。"""
+    _require_v2_session(current_user["id"], session_id)
+    return interview_agent_service.pause_interview(current_user["id"], session_id)
+
+
+@router.post("/{session_id}/resume")
+def resume_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    """v1.1: 回到页面恢复面试计时。"""
+    _require_v2_session(current_user["id"], session_id)
+    return interview_agent_service.resume_interview(current_user["id"], session_id)
+
+
 @router.post("/{session_id}/reply/stream")
 @limiter.limit(LLM_LIMIT)
 async def reply_interview_stream(
+    request: Request,
     session_id: str,
-    request: ReplyInterviewRequest,
+    body: ReplyInterviewRequest,
     current_user: dict = Depends(get_current_user),
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
 ) -> StreamingResponse:
@@ -124,7 +138,7 @@ async def reply_interview_stream(
     payload, delta_queue = await interview_agent_service.reply_to_interview_streaming(
         current_user["id"],
         session_id,
-        request.content,
+        body.content,
         request_id=request_id,
     )
     payload["delta_queue"] = delta_queue

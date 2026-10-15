@@ -1,8 +1,9 @@
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.errors import ErrorCode, raise_app_error
+from app.core.locale import DEFAULT as DEFAULT_LOCALE, SUPPORTED
 from app.core.security import decode_access_token
 from app.db.store import Store
 
@@ -24,3 +25,11 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     if not user:
         raise_app_error(401, ErrorCode.USER_NOT_FOUND, "用户不存在")
     return user
+
+
+def get_locale(request: Request) -> str:
+    """v1.1: 取 Accept-Language 解析后的 locale（en|zh）。"""
+    locale = getattr(request.state, "locale", None)
+    if locale in SUPPORTED:
+        return locale
+    return DEFAULT_LOCALE

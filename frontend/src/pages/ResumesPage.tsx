@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { CheckCircle2, Clock3, FileText, Info, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ResumePreviewPanel } from '../components/ResumePreviewPanel'
 import type { ResumeSummary } from '../types'
 import { formatDateTime, formatResumeMeta, getResumeBadge, MAX_RESUME_COUNT, type ResumeCardItem } from '../utils/resume'
@@ -30,6 +31,8 @@ export function ResumesPage({
   onResumeUpload,
   onResumeDelete,
 }: ResumesPageProps) {
+  const { t } = useTranslation('resumes')
+  const { t: tc } = useTranslation('common')
   const [deleteTarget, setDeleteTarget] = useState<ResumeCardItem | null>(null)
 
   function closeDeleteDialog() {
@@ -43,9 +46,9 @@ export function ResumesPage({
       <header className="v2-page-header">
         <div>
           <div className="v2-title-row">
-            <h2>我的简历</h2>
+            <h2>{t('page_title')}</h2>
           </div>
-          <p>管理用于 AI 面试官生成面试计划的候选人资料。</p>
+          <p>{t('page_subtitle')}</p>
         </div>
         <div className="v2-hero-art" aria-hidden="true">
           <div className="v2-hero-doc doc-a" />
@@ -58,7 +61,7 @@ export function ResumesPage({
       <section className="v2-resume-page">
         <div className="v2-resume-page-header">
           <h3>
-            简历列表 <span>{resumes.length}/{MAX_RESUME_COUNT}</span>
+            Resume List <span>{resumes.length}/{MAX_RESUME_COUNT}</span>
           </h3>
         </div>
         <div className="v2-resume-grid">
@@ -73,7 +76,7 @@ export function ResumesPage({
                 <button
                   type="button"
                   className="v2-resume-card-delete"
-                  aria-label={`删除 ${resume.filename}`}
+                  aria-label={`Delete ${resume.filename}`}
                   disabled={deletingResumeId === resume.id || resume.parse_status === 'processing'}
                   onClick={() => setDeleteTarget(resume)}
                 >
@@ -87,7 +90,7 @@ export function ResumesPage({
                   disabled={resume.parse_status !== 'ready'}
                   onClick={() => void onResumeSelect(resume.id)}
                 >
-                  查看结果
+                  View
                 </Button>
               </div>
               <div className="v2-resume-card-icon">
@@ -98,7 +101,7 @@ export function ResumesPage({
                 <strong>{resume.filename}</strong>
                 <div className="v2-resume-skills">
                   {resume.parse_status === 'processing' ? (
-                    <Badge variant="secondary">正在解析</Badge>
+                    <Badge variant="secondary">{t('status_processing')}</Badge>
                   ) : resume.technical_skills.length > 0 ? (
                     resume.technical_skills.slice(0, 3).map((skill) => (
                       <Badge key={skill} variant="secondary">
@@ -106,12 +109,12 @@ export function ResumesPage({
                       </Badge>
                     ))
                   ) : (
-                    <Badge variant="secondary">暂无技能标签</Badge>
+                    <Badge variant="secondary">—</Badge>
                   )}
                 </div>
                 <p>
                   <Clock3 />
-                  {resume.parse_status === 'processing' ? '正在解析简历内容' : formatResumeMeta(resume)}
+                  {resume.parse_status === 'processing' ? t('extracting') : formatResumeMeta(resume)}
                 </p>
               </div>
               <div className="v2-resume-card-footer">
@@ -121,7 +124,9 @@ export function ResumesPage({
                   ) : (
                     <CheckCircle2 />
                   )}
-                  <span>{resume.parse_status === 'processing' ? '解析中' : '已解析完成'}</span>
+                  <span>
+                    {resume.parse_status === 'processing' ? t('status_processing') : t('status_ready')}
+                  </span>
                 </div>
               </div>
             </Card>
@@ -139,37 +144,33 @@ export function ResumesPage({
             <span className="v2-resume-upload-plus">
               <Plus />
             </span>
-            <strong>{isExtracting ? '简历解析中...' : '添加简历'}</strong>
-            <p>支持 PDF、DOC、DOCX、TXT、MD 格式</p>
+            <strong>{isExtracting ? t('extracting') : t('upload_button')}</strong>
+            <p>{t('upload_hint')}</p>
           </Label>
         </div>
         {selectedResume ? (
           <div className="v2-resume-page-tip">
-            当前查看：{selectedResume.filename}。这份简历已可用于后续面试配置。
+            {t('status_ready')}: {selectedResume.filename}
           </div>
         ) : (
-          <div className="v2-resume-page-tip">
-            {resumes.length === 0 ? '请先上传一份简历。' : '点击“查看结果”查看简历解析摘要。'}
-          </div>
+          <div className="v2-resume-page-tip">{t('empty_state')}</div>
         )}
         {selectedResume ? (
           <ResumePreviewPanel resume={selectedResume} updatedAtText={formatDateTime(selectedResume.updated_at)} />
         ) : null}
         <div className="v2-resume-hint">
           <Info />
-          点击“查看结果”查看简历解析摘要。
+          {t('empty_state')}
         </div>
       </section>
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => (!open ? closeDeleteDialog() : undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除简历</AlertDialogTitle>
-            <AlertDialogDescription>
-              确定删除简历“{deleteTarget?.filename}”吗？删除后不能继续使用这份简历。
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t('delete_confirm_title')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('delete_confirm_body')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={Boolean(deletingResumeId)}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={Boolean(deletingResumeId)}>{tc('cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="v2-dialog-confirm"
               disabled={Boolean(deletingResumeId)}
@@ -179,7 +180,7 @@ export function ResumesPage({
                 void onResumeDelete(deleteTarget).then(() => setDeleteTarget(null))
               }}
             >
-              {deletingResumeId ? '处理中...' : '确定'}
+              {deletingResumeId ? tc('submitting') : tc('confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

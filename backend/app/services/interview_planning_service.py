@@ -8,7 +8,7 @@ from app.core.constants import InterviewPlanSessionStatus
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.logging_utils import log_payload, new_trace_id
 from app.db.store import Store
-from app.services.interview_configuration_service import TARGET_ROLES
+from app.services.interview_configuration_service import configuration_labels
 from app.services.interview_planning.constants import MAX_REGENERATIONS
 from app.services.interview_planning.context import get_planning_context
 from app.services.interview_planning.preview import build_plan_preview, build_version_history_item
@@ -281,8 +281,8 @@ class InterviewPlanningService:
 
     @staticmethod
     def _build_session_title(configuration: dict[str, Any]) -> str:
-        role_label = next(
-            (item["label"] for item in TARGET_ROLES if item["value"] == configuration["target_role"]),
-            configuration["target_role"],
-        )
-        return f"{role_label}面试"
+        """v1.1: 标题按 interview_language 选 label + 后缀。"""
+        lang = configuration.get("interview_language") or "en"
+        labels = configuration_labels(configuration, locale=lang)
+        role = labels.get("target_role_label") or configuration.get("target_role", "")
+        return f"{role} {'面试' if lang == 'zh' else 'Interview'}"

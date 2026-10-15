@@ -1,3 +1,5 @@
+import i18n from '@/i18n'
+import { bcp47ForIntl } from '@/i18n/useLocale'
 import type { ResumeExtractResponse, ResumeSummary } from '@/types'
 
 export type ResumeCardItem = ResumeSummary & {
@@ -60,17 +62,22 @@ export function getResumeBadge(filename: string) {
   return extension.slice(0, 4)
 }
 
+function currentLocale(): 'en' | 'zh' {
+  const raw = (i18n.language || 'en').split('-')[0]
+  return (raw === 'zh' ? 'zh' : 'en') as 'en' | 'zh'
+}
+
 export function formatResumeMeta(resume: ResumeSummary) {
   const updatedAtText = formatDateTime(resume.updated_at)
-  return `更新于 ${updatedAtText}`
+  return i18n.t('resumes:updated_at', { time: updatedAtText })
 }
 
 export function formatDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
-    return value || '未知时间'
+    return value || '—'
   }
-  return date.toLocaleString('zh-CN', {
+  return date.toLocaleString(bcp47ForIntl(currentLocale()), {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

@@ -5,6 +5,7 @@ import { LoadingOverlay } from '@/components/LoadingOverlay'
 import { RegeneratePlanDialog } from '@/components/RegeneratePlanDialog'
 import { CalendarClock, CheckCircle2, ClipboardList, Lock, RefreshCw, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useActivateLiveInterview } from '@/hooks/useInterviewLive'
 import { useConfirmInterviewPlan, useInterviewPlanSessionDetail, useRegenerateInterviewPlan } from '@/hooks/useInterviewPlan'
@@ -15,6 +16,9 @@ interface InterviewPlanPageProps {
 }
 
 export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
+  const { t } = useTranslation('plans')
+  const { t: tInterview } = useTranslation('interview')
+  const { t: tc } = useTranslation('common')
   const { sessionId = '' } = useParams()
   const navigate = useNavigate()
   const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false)
@@ -54,7 +58,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
       }
       navigate(`/interviews/${sessionId}/live`)
     } catch (err) {
-      setActionError(readError(err))
+      setActionError(err instanceof Error ? err.message : tc('request_failed'))
     }
   }
 
@@ -63,8 +67,8 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
       <>
         <header className="v2-page-header">
           <div>
-            <h2>面试计划</h2>
-            <p>正在加载计划摘要…</p>
+            <h2>{t('plan_title')}</h2>
+            <p>{tc('loading')}</p>
           </div>
           <InterviewHeaderArt />
         </header>
@@ -77,14 +81,14 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
       <>
         <header className="v2-page-header">
           <div>
-            <h2>面试计划</h2>
-            <p className="v2-error">{error ? readError(error) : '暂无计划数据'}</p>
+            <h2>{t('plan_title')}</h2>
+            <p className="v2-error">{error ? (error instanceof Error ? error.message : tc('request_failed')) : '—'}</p>
           </div>
           <InterviewHeaderArt />
         </header>
         <div className="v2-plan-action-bar">
           <button type="button" className="v2-text-button" onClick={() => navigate('/interviews/new')}>
-            返回配置
+            {tc('back')}
           </button>
         </div>
       </>
@@ -101,19 +105,15 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
       <header className="v2-page-header">
         <div>
           <div className="v2-title-row">
-            <h2>面试计划预览</h2>
+            <h2>{t('plan_title')}</h2>
             {isLocked ? (
               <Badge variant="secondary" className="v2-plan-locked-badge">
                 <Lock size={14} />
-                计划已锁定
+                {t('plan_status_confirmed')}
               </Badge>
             ) : null}
           </div>
-          <p>
-            {isLocked
-              ? '计划已确认，可继续进入正式面试。'
-              : '确认考察方向与参考摘要；完整开场题与追问话术不会在此展示。'}
-          </p>
+          <p>{t('plan_subtitle')}</p>
         </div>
         <InterviewHeaderArt />
       </header>
@@ -130,7 +130,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
               onClick={() => setRegenerateDialogOpen(true)}
             >
               <RefreshCw size={16} />
-              重新生成（剩余 {plan.regenerations_remaining} 次）
+              {t('btn_regenerate')} ({plan.regenerations_remaining})
             </button>
           ) : null}
           {canConfirm ? (
@@ -141,12 +141,12 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
               onClick={handleConfirmAndStart}
             >
               <CheckCircle2 size={16} />
-              {isStarting ? '正在进入…' : '确认并开始面试'}
+              {isStarting ? tc('submitting') : t('btn_confirm')}
             </button>
           ) : null}
           {isLocked ? (
             <button type="button" className="v2-btn-confirm" disabled={isStarting} onClick={handleConfirmAndStart}>
-              {isStarting ? '正在进入…' : '继续面试'}
+              {isStarting ? tc('submitting') : t('btn_confirm')}
             </button>
           ) : null}
         </div>
@@ -159,25 +159,27 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
               <Sparkles />
             </span>
             <div>
-              <h3>计划摘要</h3>
+              <h3>{t('plan_overview')}</h3>
               <p>
-                版本 {plan.plan_version}
-                {isLocked ? ' · 已锁定' : ` · 还可重新生成 ${plan.regenerations_remaining} 次`}
+                v{plan.plan_version} ·{' '}
+                {isLocked
+                  ? t('plan_status_confirmed')
+                  : `${plan.regenerations_remaining} left`}
               </p>
             </div>
           </div>
 
           <div className="v2-plan-meta-grid">
-            <MetaItem label="面试类型" value={summary.interview_type_label} />
-            <MetaItem label="目标岗位" value={summary.target_role_label} />
-            <MetaItem label="技术语言" value={summary.language_label} />
-            <MetaItem label="目标难度" value={summary.target_level_label} />
-            <MetaItem label="预计时长" value={`${summary.duration_minutes} 分钟`} />
-            <MetaItem label="JD" value={summary.has_jd ? '已提供' : '未提供'} />
+            <MetaItem label={tInterview('label_interview_type')} value={summary.interview_type_label} />
+            <MetaItem label={tInterview('label_target_role')} value={summary.target_role_label} />
+            <MetaItem label={tInterview('label_language')} value={summary.language_label} />
+            <MetaItem label={tInterview('label_target_level')} value={summary.target_level_label} />
+            <MetaItem label={tInterview('label_duration')} value={tc('minutes', { count: summary.duration_minutes })} />
+            <MetaItem label="JD" value={summary.has_jd ? 'YES' : 'NO'} />
           </div>
 
           <div className="v2-plan-focus-block">
-            <span>用户选择的重点方向</span>
+            <span>{t('plan_topics')}</span>
             <div className="v2-focus-options">
               {summary.focus_topics.map((topic) => (
                 <Badge key={topic} variant="secondary">
@@ -188,7 +190,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
           </div>
 
           <div className="v2-plan-reference-block">
-            <span>参考摘要</span>
+            <span>{t('plan_candidate_summary')}</span>
             <ul>
               {summary.reference_summary.map((item) => (
                 <li key={item}>{item}</li>
@@ -204,14 +206,14 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
                 <ClipboardList />
               </span>
               <div>
-                <h3>考察方向</h3>
+                <h3>{t('plan_topics')}</h3>
                 <p>
-                  共 {plan.topics_preview.length} 个方向，其中 {requiredCount} 个必考
+                  {plan.topics_preview.length} total, {requiredCount} required
                 </p>
               </div>
               <span className="v2-plan-duration-chip">
                 <CalendarClock size={15} />
-                45 分钟
+                {tc('minutes', { count: 45 })}
               </span>
             </div>
 
@@ -223,10 +225,10 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
                     <div className="v2-plan-topic-title">
                       <h4>{topic.name}</h4>
                       <Badge variant="secondary" className={topic.required ? 'v2-badge-required' : undefined}>
-                        {topic.required ? '必考' : '选考'}
+                        {topic.required ? 'REQUIRED' : 'OPTIONAL'}
                       </Badge>
                     </div>
-                    <p>预计 {topic.estimated_minutes} 分钟</p>
+                    <p>{tc('minutes', { count: topic.estimated_minutes })}</p>
                   </div>
                 </article>
               ))}
@@ -235,7 +237,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
         </div>
       </section>
 
-      {isStarting ? <LoadingOverlay open message="正在生成首题，请稍候…" /> : null}
+      {isStarting ? <LoadingOverlay open message={tInterview('live_loading')} /> : null}
 
       <RegeneratePlanDialog
         open={regenerateDialogOpen}
@@ -255,7 +257,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
               setRegenerateDialogOpen(false)
             },
             onError: (err) => {
-              setActionError(readError(err))
+              setActionError(err instanceof Error ? err.message : tc('request_failed'))
             },
           })
         }}
@@ -271,8 +273,4 @@ function MetaItem({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   )
-}
-
-function readError(error: unknown) {
-  return error instanceof Error ? error.message : '请求失败'
 }

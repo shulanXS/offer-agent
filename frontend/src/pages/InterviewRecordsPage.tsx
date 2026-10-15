@@ -5,16 +5,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useInterviewOptions } from '@/hooks/useInterviewConfiguration'
 import { useInterviewSessionList } from '@/hooks/useInterviewSessionList'
 import {
-  INTERVIEW_LIST_LABELS,
-  type InterviewListDisplayLabel,
   type InterviewSessionListItem,
 } from '@/types/interviewSessionList'
+import { bcp47ForIntl } from '@/i18n/useLocale'
+import i18n from '@/i18n'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, LoaderCircle } from 'lucide-react'
 import {
   buildScoreRingPresentation,
   type ScoreRingPresentation,
 } from '@/utils/evaluationScorePresentation'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
 interface InterviewRecordsPageProps {
@@ -24,16 +25,20 @@ interface InterviewRecordsPageProps {
 const PAGE_SIZE = 10
 const ALL_FILTER_VALUE = 'all'
 
-const STATUS_FILTER_OPTIONS: { value: '' | InterviewListDisplayLabel; label: string }[] = [
-  { value: '', label: '全部状态' },
-  { value: 'not_started', label: '未开始' },
-  { value: 'in_progress', label: '面试中' },
-  { value: 'evaluating', label: '评估中' },
-  { value: 'pending_evaluation', label: '待评估' },
-  { value: 'completed', label: '已结束' },
+type StatusFilterValue = '' | 'not_started' | 'in_progress' | 'evaluating' | 'pending_evaluation' | 'completed'
+
+const STATUS_FILTER_OPTIONS: { value: StatusFilterValue; label: string }[] = [
+  { value: '', label: 'all' },
+  { value: 'not_started', label: 'not_started' },
+  { value: 'in_progress', label: 'in_progress' },
+  { value: 'evaluating', label: 'evaluating' },
+  { value: 'pending_evaluation', label: 'pending_evaluation' },
+  { value: 'completed', label: 'completed' },
 ]
 
 export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
+  const { t } = useTranslation('records')
+  const { t: tc } = useTranslation('common')
   const navigate = useNavigate()
   const { data, isLoading, error } = useInterviewSessionList(token)
   const { data: interviewOptions } = useInterviewOptions(token)
@@ -41,7 +46,7 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
   const sessions = data ?? []
   const [roleFilter, setRoleFilter] = useState('')
   const [levelFilter, setLevelFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'' | InterviewListDisplayLabel>('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('')
   const [page, setPage] = useState(1)
 
   const filteredSessions = useMemo(
@@ -73,8 +78,8 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
     <div className="v2-records-page">
       <header className="v2-page-header v2-records-header">
         <div>
-          <h2>面试记录</h2>
-          <p>查看你的所有模拟面试记录，分析表现，持续进步。</p>
+          <h2>{t('records_title')}</h2>
+          <p>{t('records_subtitle')}</p>
         </div>
         <InterviewHeaderArt />
       </header>
@@ -83,12 +88,12 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
         <div className="v2-records-toolbar">
           <div className="v2-records-filters">
             <RecordFilterSelect
-              ariaLabel="岗位筛选"
+              ariaLabel={t('filter_role')}
               value={roleFilter || ALL_FILTER_VALUE}
               onValueChange={(value) => setRoleFilter(value === ALL_FILTER_VALUE ? '' : value)}
-              placeholder="全部岗位"
+              placeholder={t('filter_all')}
               options={[
-                { value: ALL_FILTER_VALUE, label: '全部岗位' },
+                { value: ALL_FILTER_VALUE, label: t('filter_all') },
                 ...(interviewOptions?.target_roles ?? []).map((item) => ({
                   value: item.value,
                   label: item.label,
@@ -96,12 +101,12 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
               ]}
             />
             <RecordFilterSelect
-              ariaLabel="难度筛选"
+              ariaLabel={t('filter_level')}
               value={levelFilter || ALL_FILTER_VALUE}
               onValueChange={(value) => setLevelFilter(value === ALL_FILTER_VALUE ? '' : value)}
-              placeholder="全部难度"
+              placeholder={t('filter_all')}
               options={[
-                { value: ALL_FILTER_VALUE, label: '全部难度' },
+                { value: ALL_FILTER_VALUE, label: t('filter_all') },
                 ...(interviewOptions?.target_levels ?? []).map((item) => ({
                   value: item.value,
                   label: item.label,
@@ -109,15 +114,15 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
               ]}
             />
             <RecordFilterSelect
-              ariaLabel="状态筛选"
+              ariaLabel={t('filter_status')}
               value={statusFilter || ALL_FILTER_VALUE}
               onValueChange={(value) =>
-                setStatusFilter(value === ALL_FILTER_VALUE ? '' : (value as InterviewListDisplayLabel))
+                setStatusFilter(value === ALL_FILTER_VALUE ? '' : (value as StatusFilterValue))
               }
-              placeholder="全部状态"
+              placeholder={t('filter_all')}
               options={STATUS_FILTER_OPTIONS.map((item) => ({
                 value: item.value || ALL_FILTER_VALUE,
-                label: item.label,
+                label: t(`status_${item.label}`),
               }))}
             />
           </div>
@@ -127,24 +132,24 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
       {isLoading ? (
         <Card className="v2-panel v2-records-loading">
           <LoaderCircle className="v2-eval-spinner" size={24} />
-          <p>正在加载面试记录…</p>
+          <p>{t('records_loading')}</p>
         </Card>
       ) : null}
 
-      {error ? <p className="v2-error v2-records-error">{readError(error)}</p> : null}
+      {error ? <p className="v2-error v2-records-error">{error instanceof Error ? error.message : tc('request_failed')}</p> : null}
 
       {!isLoading && !error && sessions.length === 0 ? (
         <Card className="v2-panel v2-records-empty">
-          <p>暂无面试记录。完成「创建面试」后将出现在这里。</p>
+          <p>{t('empty_records')}</p>
           <button type="button" className="v2-btn-confirm" onClick={() => navigate('/interviews/new')}>
-            创建面试
+            {t('btn_create')}
           </button>
         </Card>
       ) : null}
 
       {!isLoading && !error && sessions.length > 0 && filteredSessions.length === 0 ? (
         <Card className="v2-panel v2-records-empty">
-          <p>没有符合筛选条件的面试记录。</p>
+          <p>{t('empty_filtered')}</p>
           {hasActiveFilters ? (
             <button
               type="button"
@@ -155,7 +160,7 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
                 setStatusFilter('')
               }}
             >
-              清除筛选
+              {t('clear_filters')}
             </button>
           ) : null}
         </Card>
@@ -169,7 +174,7 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
             ))}
           </div>
           <div className="v2-records-footer">
-            <p className="v2-records-footnote">共 {filteredSessions.length} 条记录</p>
+            <p className="v2-records-footnote">{t('total_count', { count: filteredSessions.length })}</p>
             {totalPages > 1 ? (
               <div className="v2-records-pagination">
                 <Button
@@ -180,10 +185,10 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
                   onClick={() => setPage((value) => Math.max(1, value - 1))}
                 >
                   <ChevronLeft />
-                  上一页
+                  {t('btn_prev')}
                 </Button>
                 <span className="v2-records-pagination-meta">
-                  第 {currentPage} / {totalPages} 页
+                  {t('page_meta', { current: currentPage, total: totalPages })}
                 </span>
                 <Button
                   type="button"
@@ -192,7 +197,7 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
                   disabled={currentPage >= totalPages}
                   onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                 >
-                  下一页
+                  {t('btn_next')}
                   <ChevronRight />
                 </Button>
               </div>
@@ -240,11 +245,15 @@ function InterviewRecordRow({
   session: InterviewSessionListItem
   onAction: () => void
 }) {
+  const { t } = useTranslation('records')
   const roleLabel = session.target_role_label || session.target_role || '—'
-  const levelLabel = session.target_level_label || '—'
+  const levelKey = `level_${session.target_level}`
+  const levelLabel =
+    session.target_level_label || (session.target_level ? t(levelKey as 'level_beginner') : '—')
   const title = session.title || roleLabel
   const scorePresentation = buildRecordScorePresentation(session)
-  const statusLabel = INTERVIEW_LIST_LABELS[session.display_label]
+  const statusKey = `status_${session.display_label}`
+  const statusLabel = t(statusKey as 'status_not_started')
 
   return (
     <Card className="v2-panel v2-record-row-card">
@@ -267,14 +276,14 @@ function InterviewRecordRow({
         <RecordMetric
           className="v2-record-metric-duration"
           icon={<Clock3 size={18} />}
-          value={`${session.duration_minutes} 分钟`}
-          label="测试时长"
+          value={t('common:minutes', { count: session.duration_minutes })}
+          label={t('metric_duration')}
         />
         <RecordMetric
           className="v2-record-metric-date"
           icon={<CalendarDays size={18} />}
           value={formatDateTime(session.session_at || session.created_at)}
-          label="测试日期"
+          label={t('metric_date')}
         />
 
         <div className="v2-record-row-actions">
@@ -357,7 +366,7 @@ function filterSessions(
   filters: {
     roleFilter: string
     levelFilter: string
-    statusFilter: '' | InterviewListDisplayLabel
+    statusFilter: StatusFilterValue
   },
 ) {
   let items = [...sessions]
@@ -381,7 +390,7 @@ function filterSessions(
 function formatDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', {
+  return date.toLocaleString(bcp47ForIntl(useLocaleLike()), {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -390,6 +399,8 @@ function formatDateTime(value: string) {
   })
 }
 
-function readError(error: unknown) {
-  return error instanceof Error ? error.message : '请求失败'
+function useLocaleLike() {
+  const raw = (i18n.language || 'en').split('-')[0]
+  return (raw === 'zh' ? 'zh' : 'en') as 'en' | 'zh'
 }
+

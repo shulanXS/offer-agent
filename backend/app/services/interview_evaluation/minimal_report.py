@@ -16,6 +16,7 @@ def build_minimal_evaluation_report(
     configuration: dict[str, Any],
     runtime_state: dict[str, Any],
     evaluation_context: dict[str, Any],
+    language: str = "en",
 ) -> dict[str, Any]:
     topics = plan_json.get("topics") or []
     total_topic_count = len(topics)
@@ -54,6 +55,7 @@ def build_minimal_evaluation_report(
     return {
         "version": EVALUATION_REPORT_VERSION,
         "source": EVALUATION_SOURCE_RULE_MINIMAL,
+        "report_language": language,
         "summary": summary,
         "candidate_review": candidate_review,
         "overall_score": None,

@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 
@@ -27,9 +27,19 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-Id", "Accept-Language"],
     max_age=600,
 )
+
+
+@app.middleware("http")
+async def locale_middleware(request: Request, call_next):
+    """v1.1: 把客户端的 Accept-Language 落到 request.state.locale（en|zh）。"""
+    from app.core.locale import parse_accept_language
+    request.state.locale = parse_accept_language(request.headers.get("accept-language"))
+    response = await call_next(request)
+    response.headers["Content-Language"] = request.state.locale
+    return response
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)

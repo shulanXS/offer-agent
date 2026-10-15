@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 type ConfirmDialogProps = {
@@ -17,13 +18,17 @@ export function ConfirmDialog({
   open,
   title,
   description,
-  confirmLabel = '确定',
-  cancelLabel = '取消',
+  confirmLabel,
+  cancelLabel,
   loading = false,
   danger = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { t: tc } = useTranslation('common')
+  const finalConfirm = confirmLabel ?? tc('confirm')
+  const finalCancel = cancelLabel ?? tc('cancel')
+
   useEffect(() => {
     if (!open) {
       return
@@ -50,7 +55,7 @@ export function ConfirmDialog({
 
   return (
     <div className="confirm-dialog-root" role="presentation">
-      <button type="button" className="confirm-dialog-backdrop" aria-label="关闭" disabled={loading} onClick={onCancel} />
+      <button type="button" className="confirm-dialog-backdrop" aria-label={tc('close')} disabled={loading} onClick={onCancel} />
       <div className="confirm-dialog-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-desc">
         <div className="confirm-dialog-header">
           <div className={`confirm-dialog-icon${danger ? ' danger' : ''}`} aria-hidden="true">
@@ -61,7 +66,7 @@ export function ConfirmDialog({
         <p id="confirm-dialog-desc">{description}</p>
         <div className="confirm-dialog-actions">
           <button type="button" className="ghost" disabled={loading} onClick={onCancel}>
-            {cancelLabel}
+            {finalCancel}
           </button>
           <button
             type="button"
@@ -69,7 +74,7 @@ export function ConfirmDialog({
             disabled={loading}
             onClick={onConfirm}
           >
-            {loading ? '处理中...' : confirmLabel}
+            {loading ? tc('submitting') : finalConfirm}
           </button>
         </div>
       </div>

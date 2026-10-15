@@ -7,6 +7,7 @@ import { useInterviewEvaluationReport, useRetryInterviewEvaluation } from '@/hoo
 import { useInterviewLearningContext } from '@/hooks/useInterviewLearning'
 import { ChevronLeft, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router-dom'
 import { CoveragePanel } from './evaluation/CoveragePanel'
 import { DegradedBanner } from './evaluation/DegradedBanner'
@@ -17,7 +18,7 @@ import { PracticeSection } from './evaluation/PracticeSection'
 import { ScoreRing } from './evaluation/ScoreRing'
 import { SessionComparisonSection } from './evaluation/SessionComparisonSection'
 import { buildScorePresentation } from './evaluation/utils'
-import type { LearningContextResponse } from '@/types/interviewLearning'
+import i18n from '@/i18n'
 import { buildUnifiedPracticeCards, shouldShowCrossSessionComparison } from '@/utils/buildUnifiedPracticeCards'
 import type { InterviewEvaluationReport } from '@/types/interviewEvaluation'
 
@@ -26,6 +27,8 @@ interface InterviewEvaluationPageProps {
 }
 
 export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps) {
+  const { t } = useTranslation('evaluation')
+  const { t: tc } = useTranslation('common')
   const { sessionId = '' } = useParams()
   const navigate = useNavigate()
   const { data, isPending, error, refetch } = useInterviewEvaluationReport(token, sessionId)
@@ -33,11 +36,14 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
 
   const report = data?.evaluation ?? null
   const isGenerating = (isPending || retryMutation.isPending) && !report
+  const [retryHint, setRetryHint] = useState('')
 
   async function handleRetry() {
+    setRetryHint('')
     try {
       await retryMutation.mutateAsync()
     } catch {
+      setRetryHint(tc('retry'))
       await refetch()
     }
   }
@@ -48,10 +54,10 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
         <div>
           <button type="button" className="v2-eval-back-link" onClick={() => navigate('/interviews')}>
             <ChevronLeft size={16} />
-            返回面试记录
+            {t('btn_back')}
           </button>
-          <h2>面试评估</h2>
-          <p>基于本场对话整理的可读复盘，帮你了解表现与主要不足。</p>
+          <h2>{t('title')}</h2>
+          <p>{t('section_overview')}</p>
         </div>
         <InterviewHeaderArt />
       </header>
@@ -59,14 +65,14 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
       {isGenerating ? (
         <Card className="v2-panel v2-eval-loading">
           <LoaderCircle className="v2-eval-spinner" size={28} />
-          <h3>正在生成面试反馈</h3>
-          <p>系统正在整理总结与各维度评价，请稍候。</p>
+          <h3>{t('loading')}</h3>
+          <p>{t('section_overview')}</p>
         </Card>
       ) : null}
 
       {!isGenerating && error ? (
         <Card className="v2-panel v2-eval-error">
-          <h3>评估生成失败</h3>
+          <h3>{t('degraded_banner_title')}</h3>
           <p className="v2-error">{readError(error)}</p>
           <div className="v2-eval-actions">
             <button
@@ -75,7 +81,7 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
               disabled={retryMutation.isPending}
               onClick={() => void handleRetry()}
             >
-              重试评估
+              {tc('retry')}
             </button>
           </div>
         </Card>
@@ -92,14 +98,14 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
 
       {!isGenerating && !error && !report ? (
         <Card className="v2-panel v2-eval-error">
-          <h3>暂无可展示的评估结果</h3>
-          <p>请先完成面试并进入评估状态。</p>
+          <h3>—</h3>
+          <p>{retryHint || '—'}</p>
           <button
             type="button"
             className="v2-btn-confirm"
             onClick={() => navigate(`/interviews/${sessionId}/live`)}
           >
-            返回面试
+            {tc('back')}
           </button>
         </Card>
       ) : null}
@@ -118,6 +124,7 @@ function EvaluationReportView({
   sessionId: string
   onReview: () => void
 }) {
+  const { t } = useTranslation('evaluation')
   const navigate = useNavigate()
   const { data: learningContext } = useInterviewLearningContext(token, sessionId, Boolean(report))
   const candidateReview = report.candidate_review
@@ -148,11 +155,12 @@ function EvaluationReportView({
             </div>
 
             <div className="v2-eval-overview-summary">
-              <p className="v2-eval-overview-label">综合评价</p>
+              <p className="v2-eval-overview-label">{t('section_overview')}</p>
               <p className="v2-eval-overview-copy">{candidateReview?.summary}</p>
               {scorePresentation.total > 0 ? (
                 <span className="v2-eval-overview-badge">
-                  计划 {scorePresentation.total} 个方向 · 已评 {scorePresentation.scored} 个
+                  {t('coverage_topics_total', { total: scorePresentation.total })} ·{' '}
+                  {t('coverage_topics_scored', { scored: scorePresentation.scored })}
                 </span>
               ) : null}
             </div>
@@ -192,11 +200,19 @@ function EvaluationReportView({
 
       {jdMatch ? <JdMatchSection jdMatch={jdMatch} /> : null}
 
-      <p className="v2-eval-footnote">会话 ID：{sessionId}</p>
+      <p className="v2-eval-footnote">Session ID: {sessionId}</p>
     </>
   )
 }
 
 function readError(error: unknown): string {
-  return error instanceof Error ? error.message : '请求失败'
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = String((error as { code?: string }).code ?? '')
+    if (code) {
+      const localized = i18n.t(`errors:${code}`, { defaultValue: '' })
+      return localized || code
+    }
+  }
+  return i18n.t('common:request_failed')
 }

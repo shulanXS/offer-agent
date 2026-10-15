@@ -1,0 +1,11 @@
+{
+  "brand": "AI 面试官",
+  "tagline": "专业模拟面试工作台",
+  "quota_label": "剩余额度：{{count}}",
+  "tier_label": "专业版",
+  "nav_resumes": "我的简历",
+  "nav_create": "创建面试",
+  "nav_records": "面试记录",
+  "logout": "退出登录",
+  "language": "语言"
+}

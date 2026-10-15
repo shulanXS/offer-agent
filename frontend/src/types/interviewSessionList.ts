@@ -29,16 +29,7 @@ export interface InterviewSessionListItem {
   created_at: string
 }
 
-export const INTERVIEW_LIST_LABELS: Record<InterviewListDisplayLabel, string> = {
-  not_started: '未开始',
-  in_progress: '面试中',
-  evaluating: '评估中',
-  pending_evaluation: '待评估',
-  completed: '已结束',
-}
+// 注：v1.1 起展示用 i18n（records.status_* / records.level_*），
+// 这里不再导出硬编码标签常量。
+export {}
 
-export const INTERVIEW_LEVEL_LABELS: Record<string, string> = {
-  beginner: '入门',
-  intermediate: '进阶',
-  challenge: '挑战',
-}

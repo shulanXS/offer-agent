@@ -36,6 +36,7 @@ def finalize_advance_node(state: InterviewReplyState) -> InterviewReplyState:
     following = state.get("following_topic")
     runtime_state = _mark_topic_completed(state)
     trace_id = state.get("trace_id", "")
+    interview_language = state.get("interview_language") or "en"
 
     if following is not None:
         assistant_content = act_agent.generate_message(
@@ -46,6 +47,7 @@ def finalize_advance_node(state: InterviewReplyState) -> InterviewReplyState:
             latest_answer=state["latest_answer"],
             interview_type=state["interview_type"],
             trace_id=trace_id,
+            interview_language=interview_language,
         )
         runtime_state["current_topic_id"] = str(following["id"])
         runtime_state["current_topic_round"] = 0
@@ -69,7 +71,10 @@ def finalize_advance_node(state: InterviewReplyState) -> InterviewReplyState:
             "next_status": "active",
         }
 
-    assistant_content = build_completion_message(topic_count=len(state["plan_json"].get("topics") or []))
+    assistant_content = build_completion_message(
+        topic_count=len(state["plan_json"].get("topics") or []),
+        language=interview_language,
+    )
     runtime_state["last_action"] = "finish"
     runtime_state["finish_reason"] = "interview_completed"
     return {
@@ -93,6 +98,7 @@ def finalize_forced_finish_node(state: InterviewReplyState) -> InterviewReplySta
     reason = str(boundary.get("reason") or "")
     current_topic_id = state["current_topic_id"]
     trace_id = state.get("trace_id", "")
+    interview_language = state.get("interview_language") or "en"
     runtime_state = _mark_topic_completed(state)
     runtime_state["last_action"] = "finish"
     runtime_state["finish_reason"] = reason or "forced_finish"
@@ -100,7 +106,7 @@ def finalize_forced_finish_node(state: InterviewReplyState) -> InterviewReplySta
     return {
         **state,
         "runtime_state": runtime_state,
-        "assistant_content": build_early_finish_message(reason=reason),
+        "assistant_content": build_early_finish_message(reason=reason, language=interview_language),
         "assistant_kind": "closing",
         "assistant_meta": {
             "topic_id": current_topic_id,

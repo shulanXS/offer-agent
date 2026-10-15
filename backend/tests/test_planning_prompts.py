@@ -59,6 +59,7 @@ def test_different_plan_includes_additional_instruction_in_prompt() -> None:
         "target_level": "intermediate",
         "focus_topics": ["项目深挖", "系统设计"],
         "jd_text": "",
+        "interview_language": "zh",  # v1.1
     }
     resume = {
         "personal_info": "",

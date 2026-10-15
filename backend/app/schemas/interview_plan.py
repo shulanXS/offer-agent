@@ -2,6 +2,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+# v1.1: 面试语言，与 UI 语言解耦
+InterviewLanguage = Literal["en", "zh"]
+DEFAULT_INTERVIEW_LANGUAGE: InterviewLanguage = "en"
+
 
 class CreateInterviewRequest(BaseModel):
     resume_id: str = Field(min_length=1, max_length=64)
@@ -12,6 +16,7 @@ class CreateInterviewRequest(BaseModel):
     duration_minutes: int = 45
     focus_topics: list[str] = Field(default_factory=list, max_length=6)
     jd_text: str = Field(default="", max_length=8000)
+    interview_language: InterviewLanguage = DEFAULT_INTERVIEW_LANGUAGE
 
 
 class PlanTopicPreview(BaseModel):
@@ -52,6 +57,8 @@ class InterviewPlanPreviewResponse(BaseModel):
     topics_preview: list[PlanTopicPreview]
     regenerations_remaining: int
     generation_meta: PlanGenerationMeta | None = None
+    # v1.1 F4: filled when LLM failed and returned a retryable error
+    retryable_error: dict[str, Any] | None = None
 
 
 class RegeneratePlanRequest(BaseModel):

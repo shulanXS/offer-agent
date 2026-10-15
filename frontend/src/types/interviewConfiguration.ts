@@ -21,4 +21,5 @@ export interface InterviewConfigurationDraft {
   duration_minutes: number
   focus_topics: string[]
   jd_text?: string
+  interview_language?: 'en' | 'zh'
 }

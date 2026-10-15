@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useTranslation } from 'react-i18next'
 
 export type AuthMode = 'login' | 'register'
 
@@ -30,18 +31,26 @@ export function AuthPage({
   onSubmit,
   onUsernameChange,
 }: AuthPageProps) {
+  const { t } = useTranslation('auth')
+  const { t: tc } = useTranslation('common')
   return (
     <main className="v2-shell v2-auth-shell">
       <Card className="v2-auth-card">
-        <span className="v2-kicker">AI 面试官</span>
-        <h1>专业模拟面试工作台</h1>
-        <p>登录后管理简历，并进入新版面试配置与计划生成流程。</p>
+        <span className="v2-kicker">{t('kicker')}</span>
+        <h1>{t('headline')}</h1>
+        <p>{t('subhead')}</p>
         <div className="v2-auth-tabs">
-          <Button variant={authMode === 'login' ? 'default' : 'outline'} onClick={() => onAuthModeChange('login')}>
-            登录
+          <Button
+            variant={authMode === 'login' ? 'default' : 'outline'}
+            onClick={() => onAuthModeChange('login')}
+          >
+            {t('tab_login')}
           </Button>
-          <Button variant={authMode === 'register' ? 'default' : 'outline'} onClick={() => onAuthModeChange('register')}>
-            注册
+          <Button
+            variant={authMode === 'register' ? 'default' : 'outline'}
+            onClick={() => onAuthModeChange('register')}
+          >
+            {t('tab_register')}
           </Button>
         </div>
         <form
@@ -52,11 +61,11 @@ export function AuthPage({
           }}
         >
           <Label>
-            用户名
+            {t('label_username')}
             <Input value={username} onChange={(event) => onUsernameChange(event.target.value)} required />
           </Label>
           <Label>
-            密码
+            {t('label_password')}
             <Input
               type="password"
               value={password}
@@ -67,7 +76,7 @@ export function AuthPage({
           {notice ? <p className="v2-notice">{notice}</p> : null}
           {error ? <p className="v2-error">{error}</p> : null}
           <Button type="submit" disabled={isSubmitting || !username.trim() || !password}>
-            {isSubmitting ? '提交中...' : authMode === 'login' ? '登录' : '注册并登录'}
+            {isSubmitting ? tc('submitting') : authMode === 'login' ? t('submit_login') : t('submit_register')}
           </Button>
         </form>
       </Card>
@@ -76,12 +85,12 @@ export function AuthPage({
 }
 
 export function AuthLoading() {
+  const { t } = useTranslation('common')
   return (
     <main className="v2-shell v2-auth-shell">
-      <Card className="v2-auth-card v2-loading-card">
-        <span className="v2-kicker">AI 面试官</span>
-        <h1>正在进入工作台</h1>
-        <p>正在恢复登录状态。</p>
+      <Card className="v2-auth-card">
+        <span className="v2-kicker">AI</span>
+        <p>{t('loading')}</p>
       </Card>
     </main>
   )

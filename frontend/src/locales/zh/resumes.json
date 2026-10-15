@@ -1,0 +1,22 @@
+{
+  "page_title": "我的简历",
+  "page_subtitle": "管理用于 AI 面试官生成面试计划的候选人资料。",
+  "empty_state": "还没有简历，先上传一份来开启第一次模拟面试。",
+  "uploading": "上传中…",
+  "extracting": "解析中…",
+  "upload_button": "上传简历",
+  "upload_hint": "支持 PDF / TXT / MD / DOCX，最多 5 份",
+  "max_count_error": "最多保留 {{max}} 份简历，请先删除不需要的简历。",
+  "select_label": "选择简历",
+  "delete_confirm_title": "确认删除此简历？",
+  "delete_confirm_body": "删除后无法恢复。历史报告中的简历快照会保留，但会失去与当前简历的关联。",
+  "status_processing": "处理中",
+  "status_ready": "已就绪",
+  "status_failed": "失败",
+  "updated_at": "更新于 {{time}}",
+  "resume_name": "简历名称",
+  "resume_summary": "摘要",
+  "skills": "技能",
+  "experience": "经验",
+  "education": "教育背景"
+}

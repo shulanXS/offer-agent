@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import get_current_user
 from app.core.rate_limit import limiter, AUTH_LIMIT
@@ -13,14 +13,14 @@ auth_service = AuthService()
 # A5：登录/注册 20 次/分钟
 @router.post("/register", response_model=AuthResponse)
 @limiter.limit(AUTH_LIMIT)
-def register(request: RegisterRequest) -> dict:
-    return auth_service.register(request.username, request.password)
+def register(request: Request, body: RegisterRequest) -> dict:
+    return auth_service.register(body.username, body.password)
 
 
 @router.post("/login", response_model=AuthResponse)
 @limiter.limit(AUTH_LIMIT)
-def login(request: LoginRequest) -> dict:
-    return auth_service.login(request.username, request.password)
+def login(request: Request, body: LoginRequest) -> dict:
+    return auth_service.login(body.username, body.password)
 
 
 @router.get("/me", response_model=UserProfile)

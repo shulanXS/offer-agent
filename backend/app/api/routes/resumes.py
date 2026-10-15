@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
 from app.api.deps import get_current_user
 from app.core.config import settings
@@ -30,6 +30,7 @@ def delete_resume(resume_id: str, current_user: dict = Depends(get_current_user)
 @router.post("/extract", response_model=ResumeExtractResponse)
 @limiter.limit(UPLOAD_LIMIT)
 async def extract_resume(
+    request: Request,
     file: UploadFile = File(...),
     model_provider: str = Form(settings.llm_provider),
     model_name: str = Form(settings.llm_model),

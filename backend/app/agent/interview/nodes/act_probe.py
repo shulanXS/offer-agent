@@ -22,6 +22,7 @@ def act_probe_node(state: InterviewReplyState) -> InterviewReplyState:
         interview_type=state["interview_type"],
         last_action=str(runtime_state.get("last_action") or ""),
         trace_id=trace_id,
+        interview_language=state.get("interview_language") or "en",
     )
     expected_information = decision.get("expected_information") or []
     runtime_state["current_topic_probe_count"] = int(runtime_state.get("current_topic_probe_count") or 0) + 1

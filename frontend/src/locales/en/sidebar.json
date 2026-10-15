@@ -1,0 +1,11 @@
+{
+  "brand": "AI Interviewer",
+  "tagline": "Professional mock interview workspace",
+  "quota_label": "Quota left: {{count}}",
+  "tier_label": "Pro",
+  "nav_resumes": "My Resumes",
+  "nav_create": "Create Interview",
+  "nav_records": "Interview History",
+  "logout": "Sign out",
+  "language": "Language"
+}

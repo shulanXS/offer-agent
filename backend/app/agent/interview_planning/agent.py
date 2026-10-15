@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import Counter
 from threading import Lock
 from typing import Any
@@ -10,6 +11,7 @@ from app.agent.interview_planning.prompts import build_planning_prompt
 from app.agent.interview_planning.templates import build_template_fallback_plan
 from app.agent.interview_planning.validator import PlanValidationError, validate_and_normalize_plan
 from app.core.config import settings
+from app.core.errors import PlanGenerationRetryableError
 from app.core.logging_utils import log_payload
 from app.llm.factory import create_llm_client
 from app.services.interview_planning.regeneration import validate_regeneration_strategy_outcome
@@ -194,7 +196,16 @@ class PlanningAgent:
             attempts=MAX_PLANNING_ATTEMPTS,
             trace_id=trace_id,
         )
-        return plan
+        # v1.1 F4: raise structured retryable error so the API can surface it
+        # and the UI can show a "retry with a different model" button.
+        # Legacy opt-in: set OFFER_AGENT_PLAN_FALLBACK_TO_TEMPLATE=1 to keep
+        # the v1.0 silently-degraded behavior (used by some tests / dev).
+        if os.getenv("OFFER_AGENT_PLAN_FALLBACK_TO_TEMPLATE") == "1":
+            return plan
+        raise PlanGenerationRetryableError(
+            f"计划生成失败（已重试 {MAX_PLANNING_ATTEMPTS} 次）: {last_error}",
+            retryable=True,
+        )
 
 
 def _safe_plan_log(plan: dict[str, Any]) -> dict[str, Any]:

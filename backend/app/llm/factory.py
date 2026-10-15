@@ -416,6 +416,15 @@ class LangChainLLMClient(LLMClient):
             text,
             trace_id=trace_id,
         )
+        # v1.1: 若当前请求有 patcher（ContextVar），把生成结果切片到该请求的 queue。
+        # 关键改进：避免 v1.0 monkey-patch 引起的并发串扰。
+        try:
+            from app.services.interview.reply_handler import LLMStreamPatcher
+            patcher = LLMStreamPatcher.current()
+            if patcher is not None and self.supports_streaming():
+                patcher.enqueue_chunks(text)
+        except Exception:
+            logger.exception("LLMStreamPatcher dispatch failed")
         return text
 
     def supports_streaming(self) -> bool:

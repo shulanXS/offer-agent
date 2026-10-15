@@ -1,0 +1,22 @@
+{
+  "page_title": "My Resumes",
+  "page_subtitle": "Manage candidate profiles used to generate your interview plans.",
+  "empty_state": "No resume yet. Upload one to start your first mock interview.",
+  "uploading": "Uploading…",
+  "extracting": "Extracting…",
+  "upload_button": "Upload Resume",
+  "upload_hint": "PDF, TXT, MD or DOCX, up to 5 resumes",
+  "max_count_error": "You can keep at most {{max}} resumes. Please remove an unused one first.",
+  "select_label": "Select a resume",
+  "delete_confirm_title": "Delete this resume?",
+  "delete_confirm_body": "This action cannot be undone. Past reports using this resume will keep their snapshot but lose the link.",
+  "status_processing": "Processing",
+  "status_ready": "Ready",
+  "status_failed": "Failed",
+  "updated_at": "Updated {{time}}",
+  "resume_name": "Resume name",
+  "resume_summary": "Summary",
+  "skills": "Skills",
+  "experience": "Experience",
+  "education": "Education"
+}

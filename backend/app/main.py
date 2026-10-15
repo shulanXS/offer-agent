@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.interview_options import router as interview_options_router
@@ -11,19 +12,23 @@ from app.api.routes.resumes import router as resumes_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging_utils import setup_logging
+from app.core.rate_limit import limiter, rate_limit_exceeded_handler
 from app.db.store import init_db
 
 
 logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title=settings.app_name)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 register_exception_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+    max_age=600,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -59,6 +64,10 @@ def on_startup() -> None:
         base_url,
         has_key,
         settings.log_file,
+    )
+    logger.info(
+        "CORS origins enabled: %s",
+        settings.cors_origins,
     )
 
 

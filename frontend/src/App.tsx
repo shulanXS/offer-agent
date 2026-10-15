@@ -20,9 +20,8 @@ import {
   toResumeSummary,
   type ResumeCardItem,
 } from './utils/resume'
+import { getStoredToken, registerUnauthorizedHandler, setStoredToken } from './services/client'
 import './App.css'
-
-const TOKEN_KEY = 'offer-agent-token'
 
 export default function App() {
   return (
@@ -36,7 +35,7 @@ function AppRoutes() {
   const location = useLocation()
   const navigate = useNavigate()
   const routeRemountKey = useRouteRemountKey()
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) ?? '')
+  const [token, setToken] = useState(() => getStoredToken())
   const [authMode, setAuthMode] = useState<AuthMode>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -49,6 +48,15 @@ function AppRoutes() {
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [isExtracting, setIsExtracting] = useState(false)
   const [deletingResumeId, setDeletingResumeId] = useState('')
+
+  // C4：401 自动清 token 并跳登录
+  useEffect(() => {
+    registerUnauthorizedHandler(() => {
+      clearAuth()
+      navigate('/')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!token) {
@@ -80,7 +88,7 @@ function AppRoutes() {
   }, [token])
 
   function clearAuth() {
-    localStorage.removeItem(TOKEN_KEY)
+    setStoredToken('')
     setToken('')
     setUser(null)
     setResumes([])
@@ -95,7 +103,7 @@ function AppRoutes() {
     try {
       const response: AuthResponse =
         authMode === 'login' ? await login(username.trim(), password) : await register(username.trim(), password)
-      localStorage.setItem(TOKEN_KEY, response.access_token)
+      setStoredToken(response.access_token)
       setToken(response.access_token)
       setUser(response.user)
       setPassword('')

@@ -288,6 +288,144 @@ class InterviewAgentService:
             "decision": outcome.decision,
         }
 
+    async def reply_to_interview_streaming(
+        self,
+        user_id: int,
+        session_id: str,
+        answer: str,
+        request_id: str | None = None,
+    ) -> tuple[dict[str, Any], "asyncio.Queue[str]"]:
+        """A3：流式回复。
+
+        - 复用 reply_to_interview 的所有校验（lock、状态、quota）
+        - 在异步路径中跑 LangGraph，把每次 LLM 输出切片推到 queue
+        - SSE 端从 queue 读 delta
+        - 落库时机仍为"末尾"，保证数据一致性
+        """
+        import asyncio
+        from app.services.interview.reply_handler import InterviewReplyHandler
+
+        record = self._reconcile_reply_lock(self._get_session_record(user_id, session_id))
+        trace_id = self._trace_id_from_record(record)
+
+        if record["status"] in {"evaluating", "completed"}:
+            raise_app_error(409, ErrorCode.SESSION_ALREADY_COMPLETED, "当前会话已结束", trace_id=trace_id)
+        if record["status"] != "active":
+            raise_app_error(409, ErrorCode.SESSION_NOT_ACTIVE, "请先开始正式面试", trace_id=trace_id)
+
+        runtime_state = dict(record.get("workflow_state") or {})
+        if runtime_state.get("reply_in_progress"):
+            raise_app_error(409, ErrorCode.INTERVIEW_REPLY_IN_PROGRESS, "上一条回答仍在处理中，请稍候", trace_id=trace_id)
+
+        runtime_state, _clock_changed = ensure_interview_clock_started(runtime_state)
+        runtime_state["reply_in_progress"] = True
+        self.store.update_session(session_id, workflow_state=runtime_state)
+
+        # 幂等：同 request_id 复用 user_message
+        if request_id:
+            existing = self.store.find_message_by_request_id(session_id, request_id)
+            if existing and existing.get("role") == "user":
+                assistant_message = self._latest_assistant_message(user_id, session_id)
+                updated = self._get_session_record(user_id, session_id)
+                queue: "asyncio.Queue[str]" = asyncio.Queue()
+                await queue.put(assistant_message.get("content", ""))
+                await queue.put("__DONE__")
+                return {
+                    "session": self._serialize_live(updated, start_clock=False),
+                    "user_message": existing,
+                    "assistant_message": assistant_message,
+                    "decision": {},
+                    "supports_streaming": False,
+                }, queue
+
+        record = self._get_session_record(user_id, session_id)
+        confirmed_plan_id = runtime_state.get("confirmed_plan_id") or record.get("confirmed_plan_id")
+        if not confirmed_plan_id:
+            raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "缺少已锁定计划", trace_id=trace_id)
+        plan_record = self.store.get_plan_by_id(str(confirmed_plan_id))
+        plan_json = plan_record["plan_json"]
+        configuration = record["configuration"]
+        current_topic_id = str(runtime_state.get("current_topic_id", ""))
+        current_topic = find_topic(plan_json, current_topic_id)
+        if not current_topic:
+            raise_app_error(500, ErrorCode.INTERVIEW_REPLY_FAILED, "当前主题无效", trace_id=trace_id)
+
+        cleaned_answer = answer.strip()
+        user_message = self.store.create_message(
+            session_id=session_id,
+            role="user",
+            kind="answer",
+            content=cleaned_answer,
+            meta={"topic_id": current_topic_id, "trace_id": trace_id, "request_id": request_id},
+            request_id=request_id,
+        )
+
+        queue = asyncio.Queue(maxsize=64)
+        resume = None
+        resume_id = configuration.get("resume_id") or record.get("resume_id")
+        if resume_id:
+            resume = self.store.get_resume(user_id, str(resume_id))
+
+        all_messages = list(record.get("messages") or []) + [user_message]
+        handler = InterviewReplyHandler()
+        try:
+            outcome, _collected = await handler.process_streaming(
+                plan_json=plan_json,
+                configuration=configuration,
+                resume=resume,
+                runtime_state=runtime_state,
+                current_topic=current_topic,
+                all_messages=all_messages,
+                latest_answer=cleaned_answer,
+                trace_id=trace_id,
+                delta_queue=queue,
+            )
+        except Exception:
+            record = self._get_session_record(user_id, session_id)
+            failed_state = dict(record.get("workflow_state") or {})
+            failed_state.pop("reply_in_progress", None)
+            self.store.update_session(session_id, workflow_state=failed_state)
+            raise
+
+        outcome_runtime = dict(outcome.runtime_state)
+        outcome_runtime.pop("reply_in_progress", None)
+        if outcome.next_status == "evaluating":
+            outcome_runtime = freeze_remaining_seconds(outcome_runtime)
+
+        assistant_message = self.store.create_message(
+            session_id=session_id,
+            role="assistant",
+            kind=outcome.assistant_kind,
+            content=outcome.assistant_content,
+            meta=outcome.assistant_meta,
+        )
+        self.store.update_session(
+            session_id,
+            status=outcome.next_status,
+            workflow_state=outcome_runtime,
+        )
+        updated = self._get_session_record(user_id, session_id)
+
+        payload = {
+            "session": self._serialize_live(updated, start_clock=False),
+            "user_message": user_message,
+            "assistant_message": assistant_message,
+            "decision": outcome.decision,
+            "supports_streaming": True,
+        }
+        await queue.put("__DONE__")
+        return payload, queue
+
+    def _latest_assistant_message(self, user_id: int, session_id: str) -> dict[str, Any]:
+        record = self.store.get_interview_session_record(user_id, session_id)
+        if not record:
+            return {}
+        messages = record.get("messages") or []
+        for m in reversed(messages):
+            if m.get("role") == "assistant":
+                return m
+        return {}
+
     async def stream_reply_result(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         try:
             async for chunk in self._stream_reply_result(payload):
@@ -320,12 +458,39 @@ class InterviewAgentService:
             yield format_sse("progress", progress)
 
         yield format_sse("message_start", {"session_id": session["id"], "message": assistant_message})
-        async for chunk in stream_text(
-            assistant_message["content"],
-            chunk_size=settings.stream_interview_chunk_size,
-            delay_ms=settings.stream_interview_delay_ms,
-        ):
-            yield format_sse("delta", {"message_id": assistant_message["id"], "delta": chunk})
+
+        # A3：若上游传入了 LLM delta queue，按真流推送；否则降级分块回放
+        delta_queue = payload.get("delta_queue")
+        if delta_queue is not None:
+            emitted = False
+            try:
+                while True:
+                    delta = await delta_queue.get()
+                    if delta == "__DONE__":
+                        break
+                    if not delta:
+                        continue
+                    emitted = True
+                    yield format_sse(
+                        "delta",
+                        {"message_id": assistant_message["id"], "delta": delta},
+                    )
+            except Exception as exc:
+                logger.warning("A3 stream drain failed, falling back to chunked replay: %s", exc)
+                if not emitted:
+                    async for chunk in stream_text(
+                        assistant_message["content"],
+                        chunk_size=settings.stream_interview_chunk_size,
+                        delay_ms=settings.stream_interview_delay_ms,
+                    ):
+                        yield format_sse("delta", {"message_id": assistant_message["id"], "delta": chunk})
+        else:
+            async for chunk in stream_text(
+                assistant_message["content"],
+                chunk_size=settings.stream_interview_chunk_size,
+                delay_ms=settings.stream_interview_delay_ms,
+            ):
+                yield format_sse("delta", {"message_id": assistant_message["id"], "delta": chunk})
         yield format_sse("message_end", {"message": assistant_message})
         yield format_sse("done", {"status": session["status"], "session_id": session["id"]})
 

@@ -128,6 +128,10 @@ export interface InterviewEvaluationReport {
   risks: string[]
   unverified_items: EvaluationUnverifiedItem[]
   model_info?: Record<string, unknown> | null
+  // B1：降级报告显式标记
+  degraded?: boolean
+  degraded_reason?: string
+  degraded_message?: string
 }
 
 export interface EvaluateInterviewResponse {

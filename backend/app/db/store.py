@@ -21,6 +21,10 @@ def _loads(data: str | None, fallback: Any) -> Any:
 
 def init_db() -> None:
     with get_connection() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -55,6 +59,7 @@ def init_db() -> None:
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 meta_json TEXT,
+                request_id TEXT,
                 FOREIGN KEY(session_id) REFERENCES interview_sessions(id)
             );
 
@@ -118,6 +123,14 @@ def init_db() -> None:
         _ensure_column(conn, "interview_sessions", "resume_id", "TEXT")
         _ensure_column(conn, "interview_sessions", "configuration_json", "TEXT")
         _ensure_column(conn, "interview_sessions", "confirmed_plan_id", "TEXT")
+        _ensure_column(conn, "interview_sessions", "version", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "messages", "request_id", "TEXT")
+        _ensure_index(
+            conn,
+            "messages",
+            "uniq_messages_request_id",
+            "CREATE UNIQUE INDEX uniq_messages_request_id ON messages(session_id, request_id) WHERE request_id IS NOT NULL",
+        )
         conn.commit()
 
 
@@ -126,6 +139,13 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     existing = {row[1] for row in rows}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _ensure_index(conn: sqlite3.Connection, table: str, name: str, definition: str) -> None:
+    rows = conn.execute(f"PRAGMA index_list({table})").fetchall()
+    existing = {row[1] for row in rows}
+    if name not in existing:
+        conn.execute(definition)
 
 
 @contextmanager
@@ -161,6 +181,14 @@ class Store:
         with get_connection() as conn:
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
+
+    def update_user_password_hash(self, user_id: int, password_hash: str) -> None:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+                (password_hash, _now(), user_id),
+            )
+            conn.commit()
 
     def decrement_quota(self, user_id: int) -> dict[str, Any] | None:
         with get_connection() as conn:
@@ -232,9 +260,17 @@ class Store:
             assignments.append("confirmed_plan_id = ?")
             params.append(confirmed_plan_id)
         params.append(session_id)
-        with get_connection() as conn:
-            conn.execute(f"UPDATE interview_sessions SET {', '.join(assignments)} WHERE id = ?", tuple(params))
-            conn.commit()
+        from app.db.transaction import with_retry
+
+        def _do() -> None:
+            with get_connection() as conn:
+                conn.execute(
+                    f"UPDATE interview_sessions SET {', '.join(assignments)} WHERE id = ?",
+                    tuple(params),
+                )
+                conn.commit()
+
+        with_retry(_do)
 
     def get_planning_session(self, user_id: int, session_id: str) -> dict[str, Any] | None:
         record = self.get_interview_session_record(user_id, session_id)
@@ -399,7 +435,7 @@ class Store:
         workflow_state: dict[str, Any] | None = None,
         evaluation: dict[str, Any] | None = None,
     ) -> None:
-        assignments: list[str] = ["updated_at = ?"]
+        assignments: list[str] = ["updated_at = ?", "version = version + 1"]
         params: list[Any] = [_now()]
         if status is not None:
             assignments.append("status = ?")
@@ -411,9 +447,17 @@ class Store:
             assignments.append("evaluation_json = ?")
             params.append(json.dumps(evaluation, ensure_ascii=False))
         params.append(session_id)
-        with get_connection() as conn:
-            conn.execute(f"UPDATE interview_sessions SET {', '.join(assignments)} WHERE id = ?", tuple(params))
-            conn.commit()
+        from app.db.transaction import with_retry
+
+        def _do() -> None:
+            with get_connection() as conn:
+                conn.execute(
+                    f"UPDATE interview_sessions SET {', '.join(assignments)} WHERE id = ?",
+                    tuple(params),
+                )
+                conn.commit()
+
+        with_retry(_do)
 
     def list_resumes(self, user_id: int) -> list[dict[str, Any]]:
         with get_connection() as conn:
@@ -439,7 +483,13 @@ class Store:
         kind: str,
         content: str,
         meta: dict[str, Any] | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
+        # A2：若提供了 request_id 且已存在同 session_id+request_id 的消息，直接返回原结果
+        if request_id:
+            existing = self._find_message_by_request_id(session_id, request_id)
+            if existing is not None:
+                return existing
         with get_connection() as conn:
             seq_row = conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE session_id = ?",
@@ -450,8 +500,8 @@ class Store:
             timestamp = _now()
             conn.execute(
                 """
-                INSERT INTO messages (id, session_id, seq, role, kind, content, created_at, meta_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (id, session_id, seq, role, kind, content, created_at, meta_json, request_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     message_id,
@@ -462,6 +512,7 @@ class Store:
                     content,
                     timestamp,
                     json.dumps(meta or {}, ensure_ascii=False),
+                    request_id,
                 ),
             )
             conn.commit()
@@ -474,6 +525,36 @@ class Store:
             "content": content,
             "created_at": timestamp,
             "meta": meta or {},
+        }
+
+    def find_message_by_request_id(
+        self, session_id: str, request_id: str
+    ) -> dict[str, Any] | None:
+        """A2 公开接口：按 (session_id, request_id) 查找消息。"""
+        return self._find_message_by_request_id(session_id, request_id)
+
+    def _find_message_by_request_id(
+        self, session_id: str, request_id: str
+    ) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM messages
+                WHERE session_id = ? AND request_id = ?
+                """,
+                (session_id, request_id),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "seq": row["seq"],
+            "role": row["role"],
+            "kind": row["kind"],
+            "content": row["content"],
+            "created_at": row["created_at"],
+            "meta": _loads(row["meta_json"], {}),
         }
 
     def list_messages(self, session_id: str) -> list[dict[str, Any]]:

@@ -1,6 +1,11 @@
 from app.core.config import settings
 from app.core.errors import ErrorCode, raise_app_error
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    hash_password,
+    needs_rehash,
+    verify_password,
+)
 from app.db.store import Store
 
 
@@ -23,6 +28,16 @@ class AuthService:
         user = self.store.get_user_by_username(username)
         if not user or not verify_password(password, user["password_hash"]):
             raise_app_error(401, ErrorCode.INVALID_CREDENTIALS, "用户名或密码错误")
+        # C2：老 hash 惰性升级（不阻塞主流程）
+        if needs_rehash(user["password_hash"]):
+            try:
+                self.store.update_user_password_hash(user["id"], hash_password(password))
+            except Exception:
+                import logging
+
+                logging.getLogger("uvicorn.error").exception(
+                    "password rehash failed: user_id=%s", user["id"]
+                )
         return self._build_auth_response(user)
 
     def get_public_user(self, user_id: int) -> dict:

@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_max_bytes: int = 10 * 1024 * 1024
     log_backup_count: int = 5
-    log_payload_max_chars: int = 0
+    log_payload_max_chars: int = 2000
     cors_origins_raw: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
     stream_chunk_size: int = 10
     stream_delay_ms: int = 25

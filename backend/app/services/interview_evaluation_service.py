@@ -125,12 +125,21 @@ class InterviewEvaluationService:
                 exc,
             )
             try:
-                return build_minimal_evaluation_report(
+                minimal = build_minimal_evaluation_report(
                     plan_json=plan_record["plan_json"],
                     configuration=record["configuration"],
                     runtime_state=runtime_state,
                     evaluation_context=evaluation_context,
                 )
+                # B1：降级报告 schema 显式标注
+                if isinstance(minimal, dict):
+                    minimal.setdefault("degraded", True)
+                    minimal.setdefault("degraded_reason", "evidence_driven_failed")
+                    minimal.setdefault(
+                        "degraded_message",
+                        "本场评估采用降级路径（极简模板），建议重新面试或联系管理员。",
+                    )
+                return minimal
             except Exception:
                 logger.exception("[trace_id=%s] Interview evaluation failed: session_id=%s", trace_id, record["id"])
                 raise_app_error(

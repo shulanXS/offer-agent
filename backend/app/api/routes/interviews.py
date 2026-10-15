@@ -1,10 +1,11 @@
 import asyncio
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.core.errors import ErrorCode, raise_app_error
+from app.core.rate_limit import limiter, LLM_LIMIT, UPLOAD_LIMIT
 from app.core.streaming import SSE_RESPONSE_HEADERS
 from app.schemas import ReplyInterviewRequest
 from app.schemas.interview_plan import (
@@ -57,11 +58,13 @@ def get_interview(session_id: str, current_user: dict = Depends(get_current_user
 
 
 @router.post("/{session_id}/plan/generate", response_model=InterviewPlanPreviewResponse)
+@limiter.limit(LLM_LIMIT)
 def generate_interview_plan(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
     return planning_service.generate_plan(current_user["id"], session_id)
 
 
 @router.post("/{session_id}/plan/regenerate", response_model=InterviewPlanPreviewResponse)
+@limiter.limit(LLM_LIMIT)
 def regenerate_interview_plan(
     session_id: str,
     request: RegeneratePlanRequest,
@@ -76,6 +79,7 @@ def confirm_interview_plan(session_id: str, current_user: dict = Depends(get_cur
 
 
 @router.post("/{session_id}/evaluate", response_model=EvaluateInterviewResponse)
+@limiter.limit(LLM_LIMIT)
 def evaluate_interview(session_id: str, current_user: dict = Depends(get_current_user)) -> dict:
     return evaluation_service.evaluate_interview(current_user["id"], session_id)
 
@@ -105,18 +109,27 @@ def activate_interview(session_id: str, current_user: dict = Depends(get_current
 
 
 @router.post("/{session_id}/reply/stream")
+@limiter.limit(LLM_LIMIT)
 async def reply_interview_stream(
-    session_id: str, request: ReplyInterviewRequest, current_user: dict = Depends(get_current_user)
+    session_id: str,
+    request: ReplyInterviewRequest,
+    current_user: dict = Depends(get_current_user),
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
 ) -> StreamingResponse:
     _require_v2_session(current_user["id"], session_id)
-    result = await asyncio.to_thread(
-        interview_agent_service.reply_to_interview,
+    # A2：X-Request-Id 用作幂等键
+    request_id = x_request_id or None
+    # A3：默认走真流路径（reply_to_interview_streaming）。
+    # 当 client 不支持流式时，service 内部降级到同步。
+    payload, delta_queue = await interview_agent_service.reply_to_interview_streaming(
         current_user["id"],
         session_id,
         request.content,
+        request_id=request_id,
     )
+    payload["delta_queue"] = delta_queue
     return StreamingResponse(
-        interview_agent_service.stream_reply_result(result),
+        interview_agent_service.stream_reply_result(payload),
         media_type="text/event-stream",
         headers=SSE_RESPONSE_HEADERS,
     )

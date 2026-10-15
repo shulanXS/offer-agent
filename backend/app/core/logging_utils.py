@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,23 @@ from app.core.config import settings
 
 
 FILE_LOGGER_NAMES = ("uvicorn.error", "uvicorn.access", "offer_agent")
+
+# C1：PII 脱敏正则
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_CN_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_CN_ID_RE = re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)")
+_BANK_CARD_RE = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
+
+
+def redact_pii(text: str) -> str:
+    """对文本中的 PII 做最小化脱敏。"""
+    if not text:
+        return text
+    text = _EMAIL_RE.sub("<email>", text)
+    text = _CN_PHONE_RE.sub("<phone>", text)
+    text = _CN_ID_RE.sub("<id_card>", text)
+    text = _BANK_CARD_RE.sub("<bank_card>", text)
+    return text
 
 
 def setup_logging() -> None:
@@ -57,6 +75,8 @@ def _serialize_payload(payload: Any) -> str:
             content = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
         except TypeError:
             content = str(payload)
+    # C1：脱敏 + 截断
+    content = redact_pii(content)
     if settings.log_payload_max_chars > 0 and len(content) > settings.log_payload_max_chars:
         return f"{content[:settings.log_payload_max_chars]}\n... [truncated]"
     return content

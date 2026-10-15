@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, AsyncIterator, Optional
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -13,7 +13,6 @@ from app.core.logging_utils import log_payload
 
 
 logger = logging.getLogger("uvicorn.error")
-
 _REASONING_MARKERS = (
     "让我分析一下",
     "用户要求我",
@@ -267,6 +266,30 @@ class LLMClient(ABC):
     ) -> str:
         raise NotImplementedError
 
+    async def stream_text(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        *,
+        operation_name: str = "generic",
+        trace_id: str = "",
+    ) -> "AsyncIterator[str]":
+        """A3：异步流式 LLM 输出，逐 token yield。
+
+        默认实现走同步 `generate_text` 一次性返回（保留 fallback）。
+        Provider 支持流时（LangChain chat model 有 astream），子类可重写。
+        """
+        yield self.generate_text(
+            prompt,
+            system_prompt,
+            operation_name=operation_name,
+            trace_id=trace_id,
+        )
+
+    def supports_streaming(self) -> bool:
+        """是否真正支持流式输出。子类可覆盖。"""
+        return False
+
     def generate_json(
         self,
         prompt: str,
@@ -394,6 +417,90 @@ class LangChainLLMClient(LLMClient):
             trace_id=trace_id,
         )
         return text
+
+    def supports_streaming(self) -> bool:
+        """ChatOpenAI/ChatAnthropic 都实现了 astream 协议。"""
+        return hasattr(self._model, "astream")
+
+    async def stream_text(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        *,
+        operation_name: str = "generic",
+        trace_id: str = "",
+    ) -> AsyncIterator[str]:
+        """A3：真接 LLM 流。
+
+        - 优先走 LangChain `model.astream` 拿 token 级 delta
+        - 失败/不支持时降级到 `generate_text` 一次性返回
+        """
+        log_payload(
+            logger,
+            logging.INFO,
+            f"LLM stream request: provider={self.provider_name} model={self.model_name} operation={operation_name}",
+            {"system_prompt": system_prompt or "", "prompt": prompt},
+            trace_id=trace_id,
+        )
+        if not self.supports_streaming():
+            text = self.generate_text(
+                prompt,
+                system_prompt,
+                operation_name=operation_name,
+                trace_id=trace_id,
+            )
+            if text:
+                yield text
+            return
+
+        messages = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.append(HumanMessage(content=prompt))
+
+        full_text_parts: list[str] = []
+        try:
+            async for chunk in self._model.astream(messages):
+                content = getattr(chunk, "content", None)
+                if content is None:
+                    continue
+                if isinstance(content, str):
+                    delta = content
+                elif isinstance(content, list):
+                    delta = self._normalize_content(content)
+                else:
+                    delta = str(content)
+                if not delta:
+                    continue
+                full_text_parts.append(delta)
+                yield delta
+        except Exception:
+            logger.exception(
+                "[trace_id=%s] LLM stream failed: provider=%s model=%s operation=%s",
+                trace_id or "-",
+                self.provider_name,
+                self.model_name,
+                operation_name,
+            )
+            # 降级到同步调用
+            text = self.generate_text(
+                prompt,
+                system_prompt,
+                operation_name=operation_name,
+                trace_id=trace_id,
+            )
+            if text and not full_text_parts:
+                yield text
+            return
+
+        full_text = "".join(full_text_parts)
+        log_payload(
+            logger,
+            logging.INFO,
+            f"LLM stream done: provider={self.provider_name} model={self.model_name} operation={operation_name}",
+            {"len": len(full_text), "preview": full_text[:200]},
+            trace_id=trace_id,
+        )
 
 
 def create_llm_client(provider: str | None = None, model_name: str | None = None) -> LLMClient:

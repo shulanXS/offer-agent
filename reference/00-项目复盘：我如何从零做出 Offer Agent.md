@@ -12,9 +12,9 @@ Offer Agent 是一个 AI 模拟面试练习系统。用户提供简历、岗位�
 
 ## 2. 可以核实的演进是什么
 
-Git 中 `cabf03b` 的 `backend/app/agent/workflow.py` 保留了旧流程：规划、回答处理和评估集中在一个工作流文件；回答处理通过 `follow_up_done` 控制固定的一次追问，随后切题；评估包含启发式基础结果和模型生成路径。它已经使用 LangGraph，因此不能说“V2 才首次引入 LangGraph”。
+Git 中 `cabf03b` 的 `backend/app/agent/workflow.py` 保留了旧流程：规划、回答处理和评估集中在一个工作流文件；回答处理通过 `follow_up_done` 控制固定的一次追问，随后切题；评估包含启发式基础结果和模型生成路径。它已经使用 LangGraph。
 
-当前 `5e7bafd` 把规划、面试执行、评估分为三个模块，并增加计划确认、工作记忆、证据抽取、硬边界和学习档案等结构。这个差异能支持“从固定问答推进到有计划、有证据的动态面试”的技术叙述。
+当前 main 分支把规划、面试执行、评估分为三个模块，并增加计划确认、工作记忆、证据抽取、硬边界、学习档案、`SessionState` 状态机、alembic baseline、`store` 拆 repository 集合等结构。这个差异能支持“从固定问答推进到有计划、有证据的动态面试”的技术叙述。
 
 Git 无法证明“第一版做了两周”“朋友内测发现三个问题”“跑了几十场”。旧笔记里的这些内容不继续作为事实使用。也不能仅根据最后一次提交，把所有当前设计都描述为一个人一次性完成的重构。
 
@@ -48,20 +48,20 @@ Git 无法证明“第一版做了两周”“朋友内测发现三个问题”�
 
 ## 5. 需要主动承认的边界
 
-当前 SSE 在完整生成、持久化之后再分块发送，主要改善展示节奏，不能缩短模型生成阶段的等待。工作流状态主要由服务层保存到 SQLite，不能把 LangGraph 描述成已经提供任意节点故障恢复。
+当前 SSE 通过 LangGraph `astream_events(version="v2")` 订阅 `on_chat_model_stream` 拿到真实 LLM delta 推送给前端，节点调度仍由 LangGraph 内部线程池负责；可以拿到真流，副作用是同步节点上的任何 IO 仍会阻塞事件循环分片。`store` 已经拆为 9 个 repository，跨方法事务通过 `transaction()` 上下文与 `with_retry()` 统一，但业务上不自动等同于“一个跨步骤原子操作”：要原子写仍需显式进入同一事务。
 
-硬边界位于证据抽取之前，因此触发强制切题或结束的回答可能已经存成消息，却没有走正常的本轮抽取路径。回复中的布尔标记能拦截常见重复操作，但没有证明跨进程并发正确。生产部署、备份恢复、真实模型质量基准和性能数据也不能由启动脚本推导出来。
+`SessionState` 状态机 Enum 集中定义合法转换与 `assert_transition`，但状态机约束只覆盖代码内显式调用的路径；字符串字面量散落与未覆盖分支仍可能漂移，需要在路由层与服务层对齐调用。回复幂等通过 `(session_id, request_id)` 唯一约束 + `find_message_pair_by_request_id` 按 seq 配对落地，并发请求同一 request_id 会拿到首次结果，但跨进程 worker 与外部并发目前不引入分布式锁。生产部署、备份恢复、真实模型质量基准和性能数据也不能由启动脚本推导出来。
 
 这些不足可以成为有深度的讨论：先保留原话，再补证据处理；用条件更新和版本号保护并发；用分阶段耗时定位等待；用固定样本和人工标注验证评估质量。它们是改进方向，不是已完成成果。
 
 ## 6. 一段可练习的项目介绍
 
-“这个项目是一个 AI 模拟面试系统，覆盖简历解析、计划确认、动态面试和评估反馈。它的工程重点是把模型的局部判断放在明确流程里：考察计划确认后固定版本，时间和轮数由代码控制，对话中抽取证据并映射到计划主题，最终由规则计算评分，模型补充解释。目前有完整的业务闭环，但流式回复属于生成后的分块展示，并发控制和评分校准还有改进空间。”
+“这个项目是一个 AI 模拟面试系统，覆盖简历解析、计划确认、动态面试和评估反馈。它的工程重点是把模型的局部判断放在明确流程里：考察计划确认后固定版本，时间和轮数由代码控制，对话中抽取证据并映射到计划主题，最终由规则计算评分，模型补充解释。流式回复通过 LangGraph `astream_events` 拿到真实 LLM delta；`SessionState` 状态机和 `(session_id, request_id)` 唯一约束约束状态迁移与回复幂等；后端 `store` 拆为 repository 集合，`apply_payment` 等关键路径走 `transaction()` 上下文与 `with_retry()` 统一事务与重试。目前有完整的业务闭环，但评估校准、跨进程并发与生产部署仍是后续改进方向。”
 
 这段描述能由当前实现支撑。面试中再补充自己真正负责的模块、实际遇到的问题和亲手做过的验证，不要照搬未经证实的个人经历。
 
 ## 核对与自测
 
-源码：`backend/app/services/interview_planning_service.py`、`backend/app/agent/interview/graph.py`、`backend/app/services/interview_evaluation/report.py`。历史：`git show cabf03b:backend/app/agent/workflow.py`。
+源码：`backend/app/services/interview_planning_service.py`、`backend/app/agent/interview/graph.py`、`backend/app/services/interview_evaluation/report.py`、`backend/app/core/session_state.py`、`backend/app/db/transaction.py`、`backend/app/services/interview/reply_handler.py`。历史：`git show cabf03b:backend/app/agent/workflow.py`。
 
 合上笔记，回答：为什么不能只写一个 Prompt？为什么计划确认后固定版本？为什么确定性评分仍可能不准？每个回答都至少包含一个收益、一个代价和一个验证方法。

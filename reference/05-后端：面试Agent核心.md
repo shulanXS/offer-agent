@@ -33,13 +33,15 @@ flowchart TD
 
 ## 4. 硬边界究竟怎样判断
 
-v1 阶段常量写死为 45 分钟。**v2.2 起**改为读 `session.configuration.duration_minutes`（15/30/45/60 之一），由 `ensure_interview_clock_started` 注入 deadline；其他约束保持：最后 5 分钟进入收尾区、总回答最多 12 轮、单主题最多 3 轮回答、最多 2 次追问。检查优先级是：到期 → 总轮数 → 收尾区 → 单主题轮数 → 追问次数。
+时长通过 `session.configuration.duration_minutes`（15/30/45/60 之一）决定，由 `ensure_interview_clock_started` 注入 deadline；其他约束保持：最后 5 分钟进入收尾区、总回答最多 12 轮、单主题最多 3 轮回答、最多 2 次追问。检查优先级是：到期 → 总轮数 → 收尾区 → 单主题轮数 → 追问次数。
 
 优先级有实际含义：已经到期时，不应因为仍有未问主题而继续；在收尾区则根据必考覆盖和是否还有主题决定结束或切题。这里 required_topics_covered 使用 completed_topic_ids；它代表流程完成记录，不是证据层全部信号都已验证。
 
 计数在边界检查前增加。因此第 12 次回答会触发总轮数结束，第 3 次主题回答可能触发切题；它们不是“第 13 次才拒绝”。这也引出当前缺口：这些回答已经保存，却可能不经过本轮证据抽取。结束节点会生成主题摘要，但摘要不能自动补成同等的结构化证据。
 
 另一个边界是时钟触发方式：后端在读取／回复相关流程中维护时钟、在单轮图内检查边界，不能由此声称存在独立定时任务在到期瞬间关闭所有空闲会话。激活和真正启动计时的细节由 runtime_state 中 ensure_interview_clock_started 决定。
+
+**离开页面冻结计时**：`POST /api/interviews/{id}/pause` + `/{id}/resume` 记录 `paused_at` / `total_paused_seconds`；`_compute_remaining_seconds()` 跳过暂停区间。`useInterviewPauseResume` 监听 `visibilitychange`，离开/回来自动调接口；用 `pendingActionRef` 记录最新意图解决 inFlight 期间新 pause/resume 被丢弃，`pagehide` + `fetch keepalive` 防止 tab 关闭丢请求（sendBeacon 不支持自定义 Authorization），500ms 内同动作去重避免与 visibilitychange 双发。
 
 ## 5. 库存回答怎样影响下一问
 
@@ -77,23 +79,16 @@ Decide 的上下文有消息数量和字符数限制。当前裁剪是移除最�
 
 优化前应保持一组固定回答与期望信号，比较追问质量和报告覆盖。只比较总耗时容易以质量下降换来表面提速。
 
-## 10. v2.2：算法回合
+## 10. 算法回合
 
-当 `configuration.include_algorithm=true` 时，live page 头部出现"Algorithm Round"按钮；点击打开右侧 side panel，内嵌 `AlgorithmTurn` 组件。
+当 `configuration.include_algorithm=true` 时，live page 头部出现"Algorithm Round"按钮；点击打开右侧 side panel（class `app-algo-panel`），内嵌 `AlgorithmTurn` 组件。
 
 算法回合不进入主对话流（**不**写 messages 表），仅作为本场内的辅助手写环节：
 
 - 题库来自 `backend/app/data/algorithm_problems.py`（5 道经典题：two_sum / reverse_linked_list / valid_parentheses / max_subarray / lru_cache），含隐藏测试用例
 - LLM judge 强约束 JSON-only 输出；解析失败回 `verdict=unparsed`，前端展示"暂时无法解析"提示而非 5xx
-- 评分维度 correctness / efficiency / style / edge_cases（各 1-5）+ 整体 overall + 1-2 句 feedback
+- 评分维度 correctness / efficiency / style / edge_cases（各 1-5）+ 整体 overall + 1-2 句 feedback；所有分项钳制到 [1, 5]
+- 错误码：`ALGORITHM_PROBLEM_NOT_FOUND` / `JUDGE_CODE_INVALID` / `JUDGE_LANGUAGE_UNSUPPORTED` / `JUDGE_EXECUTION_FAILED`；`/api/algorithm/judge` 加 `@limiter.limit(LLM_LIMIT)`
 - 用户可重置 / 多次提交；每次结果只更新 React state，不写 DB
 
 算法回合的设计目的：让候选人获得代码级别的练习反馈，而面试官 Agent 仍以对话形式考察设计取舍。两条流在时间线上并行（用户在某轮对话间穿插手写代码），但产物完全独立。
-
-## 核对与自测
-
-源码：`backend/app/agent/interview/graph.py`、`nodes/ingest.py`、`nodes/finalize.py`、`nodes/merge_working_memory.py`；边界与动作位于 `backend/app/services/interview/boundaries.py`、`actions.py`。
-
-测试入口：`backend/tests/test_interview_actions.py`、`test_interview_agent_step4_step5.py`、`test_interview_memory_step2.py`。
-
-推演：回答轮数从 11 变 12 时经过哪些节点？原话还在吗？为什么报告仍可能缺少本轮证据？这三个问题能够检查是否真正读懂执行顺序。

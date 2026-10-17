@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next'
 import { CheckCircle2, Loader2, XCircle, ShieldCheck } from 'lucide-react'
 import { getOrder, type BillingUserStatus } from '@/services/billing'
 import { getMe } from '@/services/auth'
+import type { UserProfile } from '@/types'
 import { ApiError, getStoredToken } from '@/services/client'
 import { Button } from '@/components/ui/button'
 
@@ -35,7 +36,7 @@ export function BillingReturnPage() {
   const timeoutRef = useRef<number | null>(null)
 
   const finish = useCallback(
-    (user: BillingUserStatus) => {
+    (user: BillingUserStatus | UserProfile) => {
       try {
         localStorage.setItem(
           'offer-agent:recharged',

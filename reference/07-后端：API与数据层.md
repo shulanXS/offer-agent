@@ -26,7 +26,7 @@ HTTPBearer 提取令牌，JWT 解码校验签名和过期时间，再由 sub 查
 
 认证通过只说明“你是谁”，不说明“这个 session_id 属于你”。服务调用 Store 时使用 user_id 与资源 ID 查询，简历引用同样要核对归属。UUID 复杂难猜只能降低猜测机会，不能代替授权。
 
-密码采用 argon2 哈希（v1 阶段使用 PBKDF2-HMAC-SHA256，老用户登录成功后惰性 rehash 升级）。验证使用恒定时间比较。JWT 签名不加密载荷，令牌中不应放入需要保密的简历原文。生产配置还需要替换默认签名密钥，详见第 11 章。**v2.2 起**：注册和登录入口对 `username` 做 `strip().lower()` 归一，规避大小写差异导致的"同账号进不去"问题；schema 加 `_no_blank` field validator 拒绝纯空白 username/password。
+密码采用 argon2 哈希（老用户历史 PBKDF2-HMAC-SHA256 12 万轮仍可验证，登录成功后惰性 rehash 升级）。验证使用恒定时间比较。JWT 签名不加密载荷，令牌中不应放入需要保密的简历原文。生产配置还需要替换默认签名密钥，详见第 11 章。注册和登录入口对 `username` 做 `strip().lower()` 归一，规避大小写差异导致的"同账号进不去"问题；schema 加 `_no_blank` field validator 拒绝纯空白 username/password。
 
 ## 3. 数据表怎样对应业务
 
@@ -38,7 +38,7 @@ JSON 便于快速演进复杂模型输出，但数据库很难直接对内部字
 
 ## 4. 当前事务边界在哪里
 
-Store 中多个方法各自建立连接并提交。因此确认计划的两个更新、激活时扣额度与写开场、回复时写用户消息与更新运行态，都不天然属于同一个业务事务。
+`Store` 拆为 9 个 repository 后，每个 repository 内部仍各自建立连接并提交。`transaction()` 上下文 + `with_retry()` 提供了显式跨步骤事务入口与"database is locked"指数退避重试，但只有显式进入同一事务的方法才原子。因此确认计划的两个更新、激活时扣额度与写开场、回复时写用户消息与更新运行态，仍需在 service 层用 `with transaction() as conn:` 包裹才能保证原子。
 
 例如激活在扣额度后生成开场，再次检查是否已经激活。顺序重复请求有返回已有会话的保护，但若两个请求同时通过前置检查，仍可能重复扣额度。应把“已有防重复逻辑”与“并发幂等性已证明”分开。
 
@@ -46,11 +46,11 @@ Store 中多个方法各自建立连接并提交。因此确认计划的两个�
 
 ## 5. 回复锁为什么只是第一步
 
-reply_in_progress 在运行态中记录处理状态，可以拦截后到的常见重复请求。详情读取会根据最后消息或过期时间清理可能遗留的标记，默认过期阈值为 300 秒。
+`messages` 表有 `(session_id, request_id)` 唯一约束；`find_message_pair_by_request_id` 按 `seq + 1` 配对 user 与紧邻的 assistant message；并发请求同 `request_id` 拿到首次结果。`reply_in_progress` 在运行态中记录处理状态，可以拦截后到的常见重复请求。详情读取会根据最后消息或过期时间清理可能遗留的标记，默认过期阈值为 300 秒。
 
-但“读标记为空 → 写 true”不是原子抢锁。两个并发请求可以都读到空。过期清理也可能与一个仍然工作的慢请求冲突。因此不应把这个布尔值描述成 Redis 锁或跨 worker 分布式锁。
+但"读标记为空 → 写 true"不是原子抢锁。两个并发请求可以都读到空。过期清理也可能与一个仍然工作的慢请求冲突。因此不应把这个布尔值描述成 Redis 锁或跨 worker 分布式锁。
 
-演进方案：用数据库条件更新原子获得处理权，携带 state_version；为一次回答设置客户端请求 ID 与唯一约束；计算后按预期版本提交消息与新状态；重复请求返回同一处理结果。慢任务再增加任务状态和租约。模型调用期间不持有长事务。
+演进方案：用数据库条件更新原子获得处理权，携带 state_version；为一次回答设置客户端请求 ID 与唯一约束；计算后按预期版本提交消息与新状态；重复请求返回同一处理结果。慢任务再增加任务状态和租约。模型调用期间不持有长事务。当前实现已落地"按 `request_id` 找首次结果 + 按 seq 配对"，但跨进程 worker 与分布式锁未提供。
 
 ## 6. 三种重复请求语义
 
@@ -60,11 +60,11 @@ reply_in_progress 在运行态中记录处理状态，可以拦截后到的常�
 
 ## 7. 索引和演进怎样讲
 
-会话按用户和更新时间查询，消息按会话和 seq 排序，计划按会话与版本查询，学习结果按档案维度查询，现有索引对应这些访问模式。
+会话按用户和更新时间查询，消息按会话和 seq 排序，计划按会话与版本查询，学习结果按档案维度查询，现有索引对应这些访问模式。`messages` 还有 `(session_id, request_id)` 唯一索引兜底幂等。
 
-启动时 init_db 创建缺失表并补充部分字段，是轻量初始化方式，不等于完整迁移系统。正式演进需要版本化迁移、旧 JSON schema 兼容、备份及失败恢复。更换数据库或扩容前，应先明确这些需求。
+`alembic` 已有 `v2_3_baseline`（down_revision=None，捕获当前 schema）+ `v2_1_initial`（依赖 baseline）两份迁移；`init_db()` 保留以兼容 pytest 内的 `fresh_db` fixture，但职责降为"幂等建表兜底"，不再做任何 `_ensure_column` 修补。正式演进（任何 schema 变动）开新 alembic 迁移文件并以 `v2_3_baseline` 为 `down_revision`。更换数据库或扩容前，应先明确这些需求。
 
-## 8. v2.2：充值与算法题（mock 支付 + LLM judge）
+## 8. 充值与算法题
 
 **充值（`/api/billing/*`）**
 
@@ -86,21 +86,36 @@ reply_in_progress 在运行态中记录处理状态，可以拦截后到的常�
 
 **算法分数不持久化到 messages.meta_json**，避免污染面试对话流；只在 live page 侧边栏展示当前回合结果。
 
-## 9. v2.2：面试配置扩展
+## 9. 面试配置扩展
 
-`POST /api/interviews` 入参在 v2.2 新增：
+`POST /api/interviews` 入参扩展了：
 
 - `duration_minutes: Literal[15, 30, 45, 60] = 45` — 替代写死 45，激活时按此计算 `deadline_at`
 - `include_algorithm: bool = False` — 标记本场是否含算法回合
 - `custom_target_role: str | None` — 当 `target_role='__custom__'` 时必填
+- `interview_language: Literal["en", "zh"] = "en"` — per-session 独立控制 LLM 输出语言（与 UI 语言解耦）；`configuration_json` 无该字段时 fallback `en`，老数据兼容
 - `focus_topics` 上限从 6 提到 8（`MAX_FOCUS_TOPICS`）
 
-`target_role` 枚举从 4 个扩展到 9 个（+ `data_ml` / `mobile` / `qa` / `sre` / `embedded` / `__custom__`）；`INTERVIEW_TYPES` 加 `intern`（实习）；`LANGUAGES` 在 schema 仍保留（兼容老数据），但前端 UI 已移除 `language` 字段让用户选择 LLM 输出的目标语种（v1.1 的 `interview_language` 字段独立保留，仍按 session 维度控制 LLM 输出语言）。
+`target_role` 枚举从 4 个扩展到 9 个（+ `data_ml` / `mobile` / `qa` / `sre` / `embedded` / `__custom__`）；`INTERVIEW_TYPES` 加 `intern`（实习）；`LANGUAGES` 在 schema 仍保留（兼容老数据），但前端 UI 已移除 `language` 字段让用户选择 LLM 输出的目标语种（`interview_language` 字段独立保留，仍按 session 维度控制 LLM 输出语言）。`request_validation.validate_interview_configuration` 对 `interview_language` 加白名单（`en` / `zh`），非法值返回 `INTERVIEW_LANGUAGE_INVALID`。
 
-`GET /api/interview-options` 返回新增 `duration_minutes_options` / `include_algorithm_supported` / `focus_topics_recommended`，前端用这些字段驱动配置页。
+`GET /api/interview-options` 返回新增 `duration_minutes_options` / `include_algorithm_supported` / `focus_topics_recommended`，前端用这些字段驱动配置页；options 按 `Accept-Language: en|zh` 返回对应 `label_en` / `label_zh`，由 `LocaleMiddleware` + `get_locale(request)` 解析。
+
+## 10. 评估锁 + SSE evaluation_done
+
+`evaluate_interview` 在并发两个标签页打开时会跑两次 LLM 评估；前端 3 秒硬等待跳走可能错过评估。
+
+- `evaluate_interview` 入口加 `interview-evaluation` 分布式锁（同 `session_locks` 表，PK=`lock_key`、`lock_type='evaluation'`、TTL=`LLM_TIMEOUT_SECONDS`）。
+- 锁被占用时：复用当前 evaluation record，否则 409。
+- 评估完成时主动推送 SSE `event: evaluation_done` 到 `/api/interviews/{id}/events/stream`（支持 `?token=` 鉴权 + Bearer），由 `app.services.events.EventBus` 在进程内 fan-out。
+
+## 11. 入账事务与 idempotency
+
+`_mark_order_paid` 由 `transaction()` + `with_retry()` 包裹，三步（订单置 paid / 写 `payments` 审计 / `apply_payment_to_user` 入账）整体回滚，任意一步失败不留半成品。`record_payment_in_conn` 返回 bool 表示新写入 / 幂等命中；调用方不再 try/except，`payments` 表 `idempotency_key=order:{id}` 防双扣。
+
+`payment_orders` 索引：`uniquepayment_orders_idem`（`idempotency_key`）、`idx_payment_orders_provider`（`provider, provider_order_id`）。Provider 路由：`POST /api/billing/orders` 创建订单；`GET /orders/{id}` 轮询；`POST /webhook/{provider}` 处理回调；`/billing/return` 落地页轮询订单状态。
 
 ## 核对与自测
 
-源码：`backend/app/api/routes/interviews.py`、`backend/app/api/deps.py`、`backend/app/core/security.py`、`backend/app/db/store.py`。
+源码：`backend/app/api/routes/interviews.py`、`backend/app/api/deps.py`、`backend/app/core/security.py`、`backend/app/core/session_state.py`、`backend/app/db/transaction.py`、`backend/app/db/store.py`、`backend/app/db/repositories/payment_repo.py`、`backend/app/services/billing_service.py`、`backend/app/services/payment_providers.py`、`backend/app/services/algorithm_judge_service.py`、`backend/app/core/locale.py`、`backend/app/core/errors.py`、`backend/app/api/routes/billing.py`、`backend/app/api/routes/algorithm.py`、`backend/app/services/events.py`。
 
 练习：画出两个激活请求交错执行的时间线，找出重复额度扣减的窗口，再写出需要原子保护的条件。只画流程，不要求先实现修复。

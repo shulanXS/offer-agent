@@ -11,10 +11,10 @@ interface PublicHomeProps {
   onRegisterClick: () => void
 }
 
-export function PublicHome({ onLoginClick, onRegisterClick }: PublicHomeProps) {
+export function PublicHome({ onRegisterClick }: PublicHomeProps) {
   return (
     <>
-      <Hero onRegisterClick={onRegisterClick} onLoginClick={onLoginClick} />
+      <Hero onRegisterClick={onRegisterClick} />
       <LiveUpdates />
     </>
   )

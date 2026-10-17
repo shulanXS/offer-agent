@@ -247,17 +247,17 @@ def _to_string_list(raw: Any, *, field: str, min_items: int, max_items: int) -> 
 
 
 CAMPUS_DIMENSION_BUCKETS: tuple[dict[str, Any], ...] = (
-    {"id": "fundamentals", "label": "技术或专业基础", "aliases": ("技术", "专业基础", "基础", "原理")},
-    {"id": "project", "label": "项目、实习或竞赛经历", "aliases": ("项目", "实习", "竞赛", "经历")},
-    {"id": "analysis", "label": "问题分析能力", "aliases": ("问题分析", "分析能力", "拆解")},
-    {"id": "learning", "label": "学习能力或成长潜力", "aliases": ("学习", "成长", "潜力")},
+    {"id": "fundamentals", "label": "技术或专业基础", "aliases": ("技术", "专业基础", "基础", "原理", "fundamentals", "foundations", "principles")},
+    {"id": "project", "label": "项目、实习或竞赛经历", "aliases": ("项目", "实习", "竞赛", "经历", "project", "internship", "competition", "experience")},
+    {"id": "analysis", "label": "问题分析能力", "aliases": ("问题分析", "分析能力", "拆解", "problem analysis", "problem solving", "problem-solving", "analytical", "decomposition")},
+    {"id": "learning", "label": "学习能力或成长潜力", "aliases": ("学习", "成长", "潜力", "learning", "growth", "potential")},
 )
 
 EXPERIENCED_DIMENSION_BUCKETS: tuple[dict[str, Any], ...] = (
-    {"id": "ownership", "label": "项目所有权和个人贡献", "aliases": ("项目", "所有权", "贡献", "经历真实性", "职责")},
-    {"id": "depth", "label": "技术深度", "aliases": ("技术深度", "技术基础", "实践能力", "实现细节")},
-    {"id": "design", "label": "方案取舍或系统设计", "aliases": ("系统设计", "方案取舍", "架构", "架构设计", "扩展性")},
-    {"id": "ops", "label": "故障处理、工程质量或业务理解", "aliases": ("故障", "工程", "质量", "业务理解", "排查", "稳定性")},
+    {"id": "ownership", "label": "项目所有权和个人贡献", "aliases": ("项目", "所有权", "贡献", "经历真实性", "职责", "project", "ownership", "contribution", "responsibility")},
+    {"id": "depth", "label": "技术深度", "aliases": ("技术深度", "技术基础", "实践能力", "实现细节", "technical depth", "technical fundamentals", "implementation", "hands-on")},
+    {"id": "design", "label": "方案取舍或系统设计", "aliases": ("系统设计", "方案取舍", "架构", "架构设计", "扩展性", "system design", "trade-off", "tradeoff", "trade off", "architecture", "scalability")},
+    {"id": "ops", "label": "故障处理、工程质量或业务理解", "aliases": ("故障", "工程", "质量", "业务理解", "排查", "稳定性", "troubleshooting", "incident", "engineering", "quality", "business", "reliability")},
 )
 
 
@@ -271,7 +271,7 @@ def assert_required_dimensions(topics: list[dict[str, Any]], *, interview_type: 
 
 def _topic_matches_bucket(topic: dict[str, Any], bucket: dict[str, Any]) -> bool:
     haystack = _topic_haystack(topic)
-    return any(alias in haystack for alias in bucket["aliases"])
+    return any(alias.casefold() in haystack for alias in bucket["aliases"])
 
 
 def _topic_haystack(topic: dict[str, Any]) -> str:
@@ -280,4 +280,4 @@ def _topic_haystack(topic: dict[str, Any]) -> str:
         str(topic.get("dimension", "")),
         " ".join(str(item) for item in topic.get("focus_points", [])),
     ]
-    return " ".join(parts)
+    return " ".join(parts).casefold()

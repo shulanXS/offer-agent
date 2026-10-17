@@ -1,0 +1,7 @@
+{
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://offer-agent-api-production.up.railway.app/api/:path*" },
+    { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
+  ]
+}

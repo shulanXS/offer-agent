@@ -20,8 +20,8 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Only use explicit project configuration from backend/.env plus code defaults.
-        return init_settings, dotenv_settings, file_secret_settings
+        # Cloud-injected environment variables override local development defaults.
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
 
     app_name: str = "Offer Agent"
     app_env: str = "development"

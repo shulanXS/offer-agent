@@ -4,6 +4,7 @@ from __future__ import annotations
 from app.agent.interview.nodes._agents import act_agent
 from app.agent.interview.state import InterviewReplyState
 from app.agent.interview.transitions import build_completion_message, build_early_finish_message
+from app.core.session_state import SessionState
 from app.services.interview.constants import INTERVIEW_PHASE_TOPIC_QUESTION
 from app.services.interview.topic_summary import build_topic_summary
 
@@ -68,7 +69,7 @@ def finalize_advance_node(state: InterviewReplyState) -> InterviewReplyState:
                 "source_opening_question": str(following.get("opening_question", "")),
                 "decision_reason": decision.get("reason", ""),
             },
-            "next_status": "active",
+            "next_status": SessionState.ACTIVE.value,
         }
 
     assistant_content = build_completion_message(
@@ -89,7 +90,7 @@ def finalize_advance_node(state: InterviewReplyState) -> InterviewReplyState:
             "is_follow_up": False,
             "decision_reason": decision.get("reason", ""),
         },
-        "next_status": "evaluating",
+        "next_status": SessionState.EVALUATING.value,
     }
 
 
@@ -116,7 +117,7 @@ def finalize_forced_finish_node(state: InterviewReplyState) -> InterviewReplySta
             "decision_reason": reason,
             "forced_finish": True,
         },
-        "next_status": "evaluating",
+        "next_status": SessionState.EVALUATING.value,
         "decision": {
             "action": "finish",
             "reason": reason,

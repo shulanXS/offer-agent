@@ -259,7 +259,7 @@ export function BillingPanel({ open, onClose, token, onRecharged }: BillingPanel
                   <Button
                     type="button"
                     className={`app-billing-cta${isRecommended ? ' app-billing-cta-primary' : ''}`}
-                    disabled={payState === 'loading' || isPaying || payState === 'success'}
+                    disabled={isPaying || payState === 'success'}
                     onClick={() => void handlePay(pkg)}
                   >
                     {isPaying ? (

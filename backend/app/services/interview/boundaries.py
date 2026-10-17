@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.core.session_state import SessionState
 from app.services.interview.constants import (
     INTERVIEW_DURATION_MINUTES,
     INTERVIEW_WRAP_UP_MINUTES,
@@ -63,7 +64,7 @@ def resolve_display_remaining_seconds(
     session_status: str,
     session_updated_at: str | None = None,
 ) -> int | None:
-    if session_status == "active":
+    if session_status == SessionState.ACTIVE.value:
         if not deadline_at:
             return INTERVIEW_DURATION_MINUTES * 60
         return remaining_seconds(deadline_at)

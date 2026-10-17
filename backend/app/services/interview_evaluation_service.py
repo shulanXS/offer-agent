@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.events import commit_event
 from app.core.logging_utils import log_payload, new_trace_id
+from app.core.session_state import SessionState
 from app.db.store import Store
 from app.services.events import bus, evaluation_channel
 from app.services.interview_evaluation.context import build_evaluation_context
@@ -31,10 +32,10 @@ class InterviewEvaluationService:
         record = self._get_v2_record(user_id, session_id)
         trace_id = self._trace_id_from_record(record)
 
-        if record["status"] == "completed" and record.get("evaluation"):
+        if record["status"] == SessionState.COMPLETED.value and record.get("evaluation"):
             return self._build_response(record)
 
-        if record["status"] != "evaluating":
+        if record["status"] != SessionState.EVALUATING.value:
             raise_app_error(
                 409,
                 ErrorCode.SESSION_NOT_ACTIVE,
@@ -57,7 +58,7 @@ class InterviewEvaluationService:
         if acquire is None or acquire.get("locked"):
             # 锁被他人持有：复用当前 evaluation record（如已有）或 409
             existing = self._get_v2_record(user_id, session_id)
-            if existing["status"] == "completed" and existing.get("evaluation"):
+            if existing["status"] == SessionState.COMPLETED.value and existing.get("evaluation"):
                 return self._build_response(existing)
             raise_app_error(
                 409,

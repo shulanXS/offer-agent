@@ -26,9 +26,11 @@ local 模式把分词后的 token 哈希到固定维度，累加带符号权重�
 
 模型返回合法 JSON 只解决语法问题。业务还要求主题数量、字段、唯一 ID、必考维度、时间预算和候选人摘要边界。
 
-当前计划规范化处理 4—5 个主题、至少 4 个必考主题，检查校招／社招维度，调整时间预算，并防止候选人摘要泄露完整 opening_question。偶发超量主题有裁剪处理，不能概括为“任何不合格都整轮重试”。
+当前计划规范化处理 4—5 个主题、至少 4 个必考主题，检查校招／社招维度，调整时间预算，并防止候选人摘要泄露完整 `opening_question`。偶发超量主题有裁剪处理，不能概括为"任何不合格都整轮重试"。
 
-Agent 最多尝试三次，校验反馈进入下一次提示词；失败后构建模板计划并标记来源、尝试次数和降级原因。重生成还要求符合策略、与旧版有有效差异。这样能够识别“格式正确但调整没有生效”。
+Agent 最多尝试三次，校验反馈进入下一次提示词；失败后构建模板计划并标记来源、尝试次数和降级原因。重生成还要求符合策略、与旧版有有效差异。这样能够识别"格式正确但调整没有生效"。
+
+`interview_language` 控制 Planning LLM 输出语言：system prompt 中加 `Output language: {en|zh}` 约束；中文岗位描述/考察点措辞与英文分开两套模板（`build_planning_prompt()` 按 `interview_language` 切中英文模板）；生成失败时 `PlanGenerationRetryableError` 走全局 handler，HTTP 200 + `retryable_error.retryable=true`，前端可展示"换个模型重试"按钮；`OFFER_AGENT_PLAN_FALLBACK_TO_TEMPLATE=1` 走旧行为。
 
 注意：输出校验可以检查字段和规则，但不能充分证明主题贴合简历或问题具备高质量。后者仍需样本评估。
 
@@ -47,13 +49,15 @@ Agent 最多尝试三次，校验反馈进入下一次提示词；失败后构�
 
 ## 6. SSE 怎样工作
 
-回复路由先等待 reply_to_interview 完成，再返回 StreamingResponse。流内依次发送 session_state、progress、message_start、delta、message_end、done。delta 来自已生成完整文本的切块，不是模型 token。
+回复路由先等待 `process_streaming` 完成 stream 收集，再返回 `StreamingResponse`。`process_streaming` 通过 `interview_reply_graph.astream_events(initial_state, version="v2")` 订阅 `on_chat_model_stream` 事件，把 LangChain message chunk 的 `content` 推 `delta_queue`；SSE 路由依次发送 `session_state` / `progress` / `message_start` / `delta` / `message_end` / `done`，delta 来自 `astream_events` 拿到的真流 chunk。前端 `consumeEventStream` 用 `AbortController` + 15s `ping` 心跳 + `X-Request-Id` 重放实现断线重连；流开始后异常可用 `event: error` 表达（前端收到后 `reader.cancel()` + `return`），流开始前的业务失败仍是 HTTP 错误。
 
-因此等待可拆成：请求校验与读取 + 图中各项计算 + 持久化 + 分块展示。前端打字快慢只改变最后一项。若要改善开始等待，先测抽取、决策、话术等阶段，不能把 chunk_size 调小当成模型提速。
+评估完成时 `evaluate_interview` 通过进程内 `EventBus` 推送 `evaluation_done` 事件，live page `subscribeInterviewEvents` 用 `EventSource` 订阅 `/api/interviews/{id}/events/stream?token=…`，`beginPostFinishFlow` 改为先订阅 + 启动 evaluate + 30s 兜底 timer，收到 `evaluation_done` 后立即 navigate 到 evaluation 页。
 
-流开始后异常可用 error 事件表达；流开始前的业务失败仍是 HTTP 错误。这两类失败需要分别处理。当前没有仅凭 SSE 就获得断点续传、取消模型计算或可靠消息队列的能力。
+因此等待可拆成：请求校验与读取 + 图中各项计算 + 持久化 + 真流 delta 推送。前端打字快慢取决于 `delta_queue` 消费速度。若要继续降低开始等待，先测抽取、决策、话术等阶段。
 
-## 6.5 v2.2 算法 judge：JSON 强约束 + 兜底
+`stream_reply_result` 在 `error` 事件后立即 `return`，客户端收到 `event: error` 后 `reader.cancel()` + `return`。当前没有仅凭 SSE 就获得断点续传、取消模型计算或可靠消息队列的能力。
+
+## 6.5 算法 judge：JSON 强约束 + 兜底
 
 `algorithm_judge_service.judge_submission()` 在 prompt 中约束"Return JSON only"，但仍做三层鲁棒：
 
@@ -61,9 +65,9 @@ Agent 最多尝试三次，校验反馈进入下一次提示词；失败后构�
 2. 第一个 `{` 起 + 平衡括号匹配截取
 3. `json.loads` 解析失败时返回 `verdict=unparsed`，所有分项 0，feedback 提示重试，**不抛 5xx**
 
-评分归一化：所有分项 + overall 都钳制到 [1, 5]；不接收 0/负分/超过 5 的输出。
+评分归一化：所有分项 + overall 都钳制到 [1, 5]；不接收 0/负分/超过 5 的输出。`judge_submission` 包 `try/except`，LLM 调用失败 → 抛 `JUDGE_EXECUTION_FAILED` 错误码，**不**再被吞为 200 with unparsed。`judge_submission` 内部对 `get_problem` / `code.strip()` / language 全部用新错误码；language 走白名单。
 
-这与正常规划生成降级矩阵不同：算法 judge 不会回退到"模板"或"规则决策"，因为没有等价的本地实现，只能重试或提示用户重写。
+这与正常规划生成降级矩阵不同：算法 judge 不会回退到"模板"或"规则决策"，因为没有等价的本地实现，只能重试或提示用户重写。`/api/algorithm/judge` 加 `@limiter.limit(LLM_LIMIT)`。
 
 ## 7. 怎样验证模型与检索质量
 

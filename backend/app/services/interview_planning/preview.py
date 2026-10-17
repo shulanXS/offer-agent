@@ -1,7 +1,7 @@
 """Planning 预览：将落库计划转换为 API 响应（主题摘要、版本历史、generation_meta）。"""
 from typing import Any
 
-from app.core.constants import InterviewPlanSessionStatus
+from app.core.session_state import SessionState
 from app.services.interview_configuration_service import configuration_labels
 from app.services.interview_planning.constants import MAX_REGENERATIONS
 
@@ -64,7 +64,7 @@ def build_version_history_item(
         session_id=plan_record["session_id"],
         plan_record=plan_record,
         configuration=configuration,
-        status="plan_ready",
+        status=SessionState.PLAN_READY.value,
         locale=locale,
     )
     return {
@@ -78,6 +78,6 @@ def build_version_history_item(
 
 
 def _regenerations_remaining(plan_version: int, status: str) -> int:
-    if status == InterviewPlanSessionStatus.PLAN_CONFIRMED.value:
+    if status == SessionState.PLAN_CONFIRMED.value:
         return 0
     return max(0, MAX_REGENERATIONS - (plan_version - 1))

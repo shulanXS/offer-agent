@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.agent.interview.nodes._agents import act_agent
 from app.agent.interview.state import InterviewReplyState
+from app.core.session_state import SessionState
 from app.services.interview.constants import INTERVIEW_PHASE_TOPIC_FOLLOW_UP
 
 
@@ -44,5 +45,5 @@ def act_probe_node(state: InterviewReplyState) -> InterviewReplyState:
             "is_follow_up": True,
             "decision_reason": decision.get("reason", ""),
         },
-        "next_status": "active",
+        "next_status": SessionState.ACTIVE.value,
     }

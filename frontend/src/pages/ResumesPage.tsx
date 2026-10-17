@@ -3,12 +3,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-import { CheckCircle2, Clock3, FileText, LogIn, Plus, Trash2 } from 'lucide-react'
+import { CheckCircle2, Clock3, FileText, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ResumePreviewPanel } from '../components/ResumePreviewPanel'
 import { ReleaseLog } from '../components/ReleaseLog'
-import { useLocale } from '@/i18n/useLocale'
 import type { ResumeSummary } from '../types'
 import { formatDateTime, formatResumeMeta, getResumeBadge, MAX_RESUME_COUNT, type ResumeCardItem } from '../utils/resume'
 
@@ -35,7 +34,6 @@ export function ResumesPage({
 }: ResumesPageProps) {
   const { t } = useTranslation('resumes')
   const { t: tc } = useTranslation('common')
-  const locale = useLocale()
   const [deleteTarget, setDeleteTarget] = useState<ResumeCardItem | null>(null)
 
   function closeDeleteDialog() {
@@ -165,7 +163,7 @@ export function ResumesPage({
         {selectedResume ? (
           <ResumePreviewPanel
             resume={selectedResume}
-            updatedAtText={formatDateTime(selectedResume.updated_at, locale)}
+            updatedAtText={formatDateTime(selectedResume.updated_at)}
           />
         ) : null}
           </section>

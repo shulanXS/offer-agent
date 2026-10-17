@@ -1,6 +1,6 @@
-"""v2.3 订阅状态同步对外 facade。
+"""订阅状态同步对外 facade。
 
-将订阅状态机收敛为单一权威源（见改进方案 v2.3 §3.1）。
+将订阅状态机收敛为单一权威源。
 真正的同步逻辑已合并到 `app.db.store.Store.sync_subscription_status` / `get_user_with_synced_membership`，
 此处仅做语义化 re-export，方便 service 层在不改 import 路径的情况下调用。
 """

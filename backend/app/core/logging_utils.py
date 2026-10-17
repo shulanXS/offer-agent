@@ -17,14 +17,25 @@ _CN_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 _CN_ID_RE = re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)")
 _BANK_CARD_RE = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
 
-# 3.2：敏感字段黑名单（命中后整个值替换为占位）
+# 3.2：敏感字段黑名单（命中后整个值替换为占位）。
+# 包含：直接的 PII 字段 + 包含 content/meta 的外层 wrapper 键
+# （防止 {"assistant_message": {"content": "..."}} 被绕过）。
 _DENY_FIELDS: frozenset[str] = frozenset({
+    # 原始 PII / 隐私字段
     "resume_text",
     "jd_text",
     "content",
     "prompt",
     "system_prompt",
     "opening_question",
+    "user_message_text",
+    "assistant_message_text",
+    # 含 content 的外层 wrapper（R5 强化）
+    "user_message",
+    "assistant_message",
+    "latest_answer",
+    "user_text",
+    "assistant_text",
 })
 
 

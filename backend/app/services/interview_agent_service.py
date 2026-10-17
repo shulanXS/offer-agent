@@ -380,7 +380,7 @@ class InterviewAgentService:
                 "wrap_up_required_topics_covered",
                 "wrap_up_no_more_topics",
             }
-            if decision.get("reason") in finish_reasons and outcome.next_status == "evaluating":
+            if decision.get("reason") in finish_reasons and outcome.next_status == SessionState.EVALUATING.value:
                 # 边界类 finish：只保留 assistant 关闭消息。
                 conn.execute(
                     "DELETE FROM messages WHERE id = ?", (user_message["id"],),
@@ -563,7 +563,7 @@ class InterviewAgentService:
         decision = outcome.decision or {}
         if (
             decision.get("reason") in {"max_answer_rounds", "deadline_reached"}
-            and outcome.next_status == "evaluating"
+            and outcome.next_status == SessionState.EVALUATING.value
         ):
             with transaction() as conn:
                 conn.execute(

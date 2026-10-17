@@ -4,9 +4,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.core.constants import InterviewPlanSessionStatus
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.logging_utils import log_payload, new_trace_id
+from app.core.session_state import SessionState
 from app.db.store import Store
 from app.db.transaction import transaction
 from app.services.interview_configuration_service import configuration_labels
@@ -74,7 +74,7 @@ class InterviewPlanningService:
         )
 
         existing_plan = self.store.get_latest_plan(session_id)
-        if existing_plan and session["status"] == InterviewPlanSessionStatus.PLAN_READY.value:
+        if existing_plan and session["status"] == SessionState.PLAN_READY.value:
             return build_plan_preview(
                 session_id=session_id,
                 plan_record=existing_plan,
@@ -82,7 +82,7 @@ class InterviewPlanningService:
                 status=session["status"],
             )
 
-        if existing_plan and session["status"] != InterviewPlanSessionStatus.PLANNING.value:
+        if existing_plan and session["status"] != SessionState.PLANNING.value:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "当前会话已有计划，请使用重新生成", trace_id=trace_id)
 
         return self._generate_plan_for_session(
@@ -96,7 +96,7 @@ class InterviewPlanningService:
     def regenerate_plan(self, user_id: int, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         trace_id = new_trace_id("plan")
         session = self._get_planning_session(user_id, session_id, trace_id=trace_id)
-        if session["status"] != InterviewPlanSessionStatus.PLAN_READY.value:
+        if session["status"] != SessionState.PLAN_READY.value:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "当前状态不可重新生成计划", trace_id=trace_id)
 
         configuration = session["configuration"]
@@ -131,10 +131,10 @@ class InterviewPlanningService:
         session = self._get_planning_session(user_id, session_id, trace_id=trace_id)
         configuration = session["configuration"]
 
-        if session["status"] == InterviewPlanSessionStatus.PLAN_CONFIRMED.value:
+        if session["status"] == SessionState.PLAN_CONFIRMED.value:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "计划已确认锁定", trace_id=trace_id)
 
-        if session["status"] != InterviewPlanSessionStatus.PLAN_READY.value:
+        if session["status"] != SessionState.PLAN_READY.value:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "当前状态不可确认计划", trace_id=trace_id)
 
         latest_plan = self.store.get_latest_plan(session_id)
@@ -157,7 +157,7 @@ class InterviewPlanningService:
             self.store.update_planning_session_in_conn(
                 conn,
                 session_id,
-                status=InterviewPlanSessionStatus.PLAN_CONFIRMED.value,
+                status=SessionState.PLAN_CONFIRMED.value,
                 confirmed_plan_id=latest_plan["id"],
             )
             # 临时记录过期时间到 session workflow_state（不入 plan.status）
@@ -187,7 +187,7 @@ class InterviewPlanningService:
             session_id=session_id,
             plan_record=confirmed_plan,
             configuration=configuration,
-            status=InterviewPlanSessionStatus.PLAN_CONFIRMED.value,
+            status=SessionState.PLAN_CONFIRMED.value,
         )
 
     def supersede_plan(self, user_id: int, session_id: str) -> dict[str, Any]:
@@ -200,7 +200,7 @@ class InterviewPlanningService:
         """
         trace_id = new_trace_id("plan")
         session = self._get_planning_session(user_id, session_id, trace_id=trace_id)
-        if session["status"] != InterviewPlanSessionStatus.PLAN_CONFIRMED.value:
+        if session["status"] != SessionState.PLAN_CONFIRMED.value:
             raise_app_error(409, ErrorCode.INTERVIEW_CONFIG_INVALID, "当前状态不可撤销", trace_id=trace_id)
         import json as _json
         from datetime import datetime, timezone
@@ -225,7 +225,7 @@ class InterviewPlanningService:
             self.store.update_planning_session_in_conn(
                 conn,
                 session_id,
-                status=InterviewPlanSessionStatus.PLAN_READY.value,
+                status=SessionState.PLAN_READY.value,
                 confirmed_plan_id=None,
             )
             existing_state_row = conn.execute(
@@ -327,7 +327,7 @@ class InterviewPlanningService:
         try:
             self.store.update_planning_session(
                 session["id"],
-                status=InterviewPlanSessionStatus.PLAN_READY.value,
+                status=SessionState.PLAN_READY.value,
             )
         except Exception:
             logger.exception(
@@ -346,7 +346,7 @@ class InterviewPlanningService:
             session_id=session["id"],
             plan_record=plan_record,
             configuration=configuration,
-            status=InterviewPlanSessionStatus.PLAN_READY.value,
+            status=SessionState.PLAN_READY.value,
         )
 
     def _get_planning_session(self, user_id: int, session_id: str, *, trace_id: str) -> dict[str, Any]:

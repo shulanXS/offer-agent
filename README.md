@@ -90,6 +90,16 @@ npm run dev
 
 本地开发无需配置 `frontend/.env`，Vite 会将 `/api` 代理到 `http://localhost:8000`。
 
+## Vercel 前端部署
+
+在 Vercel 中选择 `frontend` 为 Root Directory，Framework 选择 Vite，构建命令为 `npm run build`，输出目录为 `dist`，Node.js 使用 22 或更高版本。
+
+前端 `vercel.json` 提供 SPA 页面回退；`/api` 不会回退到 HTML。上线完整功能前，在 Vercel 配置 `VITE_API_BASE_URL` 为后端 HTTPS 地址（不带末尾斜杠），然后重新部署。此变量会公开到浏览器，不应包含密钥。
+
+FastAPI 后端需要独立运行，并配置持久化数据库、模型密钥和 JWT 密钥；当前 SQLite 文件不能作为 Vercel 无服务器实例中的持久存储。后端 `CORS_ORIGINS` 和 `FRONTEND_BASE_URL` 应配置为实际前端域名。云端环境变量优先于 `backend/.env`。
+
+后端可使用 `backend/Dockerfile` 部署到 Railway，Root Directory 设置为 `/backend`，健康检查为 `/healthz`，挂载持久卷到 `/data` 并设置 `DATABASE_PATH=/data/offer_agent.db`。使用单实例、单 worker，避免本地 SQLite 跨实例分叉；日志路径可设置为 `/data/logs/offer_agent.log`。生产环境必须设置 `APP_ENV=production` 和随机生成且至少 32 字符的 `JWT_SECRET`，并注入模型 Provider 和对应 API Key。
+
 ## 模型配置
 
 在 `backend/.env` 中配置 Provider 与 Key，字段说明见 [backend/LLM_README.md](./backend/LLM_README.md)。

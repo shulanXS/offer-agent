@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.session_state import SessionState
 from app.db.store import Store
 from app.services.interview.boundaries import is_past_deadline, resolve_display_remaining_seconds
 from app.services.interview_configuration_service import configuration_labels
@@ -29,7 +30,7 @@ class InterviewSessionListService:
         workflow_state = row.get("workflow_state") or {}
         evaluation = row.get("evaluation")
 
-        if status == "active":
+        if status == SessionState.ACTIVE.value:
             deadline_at = str(workflow_state.get("deadline_at") or "")
             if is_past_deadline(deadline_at):
                 self.live_service.finish_interview(user_id, session_id, reason="stale_deadline_reached")
@@ -110,17 +111,17 @@ class InterviewSessionListService:
     ) -> tuple[str, str, str]:
         base = f"/interviews/{session_id}"
         finish_reason = str(workflow_state.get("finish_reason") or "")
-        if status == "completed":
-            return "completed", "查看评估报告", f"{base}/evaluation"
-        if status == "evaluating":
+        if status == SessionState.COMPLETED.value:
+            return SessionState.COMPLETED.value, "查看评估报告", f"{base}/evaluation"
+        if status == SessionState.EVALUATING.value:
             if finish_reason == "stale_deadline_reached":
                 return "pending_evaluation", "生成评估报告", f"{base}/evaluation"
-            return "evaluating", "查看评估报告", f"{base}/evaluation"
-        if status == "active":
+            return SessionState.EVALUATING.value, "查看评估报告", f"{base}/evaluation"
+        if status == SessionState.ACTIVE.value:
             if remaining_seconds is not None and remaining_seconds <= 0:
                 return "pending_evaluation", "生成评估报告", f"{base}/evaluation"
             return "in_progress", "继续面试", f"{base}/live"
-        if status in {"planning", "plan_ready", "plan_confirmed"}:
+        if status in {SessionState.PLANNING.value, SessionState.PLAN_READY.value, SessionState.PLAN_CONFIRMED.value}:
             return "not_started", "开始面试", f"{base}/plan"
         return "not_started", "开始面试", f"{base}/live"
 

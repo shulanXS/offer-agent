@@ -39,7 +39,7 @@ def test_find_message_pair_by_request_id_pairs_by_seq(fresh_db) -> None:
             request_id="req-1",
         )
         conn.commit()
-    user_msg = store._find_message_by_request_id(sid, "req-1")
+    user_msg = store.find_message_by_request_id(sid, "req-1")
     assert user_msg is not None
     seq = user_msg["seq"]
     with store_mod.get_connection() as conn:

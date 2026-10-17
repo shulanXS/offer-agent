@@ -10,6 +10,7 @@ const TOKEN_STORAGE_KEY = 'offer-agent-token'
 
 export type JsonBody = Record<string, unknown>
 type ApiErrorPayload = {
+  i18n_key?: string
   code?: string
   message?: string
   trace_id?: string
@@ -90,6 +91,9 @@ export async function requestJson<T>(
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       ...init,
+      // R7: keepalive 让浏览器在页面/tab 关闭时仍允许请求完成
+      // （对短请求"切换路由前发起的"特别有用，避免请求被强制 abort）
+      keepalive: init.keepalive ?? true,
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
@@ -124,6 +128,8 @@ export async function requestJson<T>(
 export async function requestFormData<T>(path: string, formData: FormData, token: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
+    // R7: keepalive 让浏览器在页面/tab 关闭时仍允许请求完成
+    keepalive: true,
     headers: {
       Authorization: `Bearer ${token}`,
     },

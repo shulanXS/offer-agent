@@ -240,23 +240,26 @@ class BillingService:
 
         v2.4 幂等：`payments.idempotency_key=order:{id}`，重复触发会因 unique
         索引报错被吞掉。
+        R3：单事务：order 置 paid + 写 audit payments + 入账 user，任意失败回滚。
         """
-        from app.db.transaction import with_retry
+        from app.db.transaction import transaction, with_retry
 
         user_id = int(order["user_id"])
         package = order["package"]
         amount, interviews_granted, expires_at = _package_meta(package)
 
         def _do() -> dict[str, Any]:
-            # 1) 标 paid
-            self.store.update_order_status(
-                order_id=order["id"],
-                status="paid",
-                paid_at=_now(),
-            )
-            # 2) 写审计 payments（关联原 order_id）
-            try:
-                self.store.record_payment(
+            with transaction() as conn:
+                # 1) 标 paid
+                self.store.update_order_status_in_conn(
+                    conn,
+                    order_id=order["id"],
+                    status="paid",
+                    paid_at=_now(),
+                )
+                # 2) 写审计 payments（关联原 order_id；幂等命中即跳过）
+                self.store.record_payment_in_conn(
+                    conn,
                     payment_id=str(uuid.uuid4()),
                     user_id=user_id,
                     package=package,
@@ -265,16 +268,14 @@ class BillingService:
                     status="succeeded",
                     idempotency_key=f"order:{order['id']}",
                 )
-            except Exception as exc:  # noqa: BLE001
-                if "uniq_payments_idem" not in str(exc):
-                    raise
-            # 3) 入账
-            self.store.apply_payment_to_user(
-                user_id=user_id,
-                package=package,
-                interviews_granted=interviews_granted,
-                subscription_expires_at=expires_at,
-            )
+                # 3) 入账
+                self.store.apply_payment_in_conn(
+                    conn,
+                    user_id=user_id,
+                    package=package,
+                    interviews_granted=interviews_granted,
+                    subscription_expires_at=expires_at,
+                )
             user_after = self.store.get_user_by_id(user_id) or {}
             return {
                 "order": _order_to_response(self.store.get_order(order["id"]) or order),

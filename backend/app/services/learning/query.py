@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.session_state import SessionState
 from app.db.store import Store
 from app.services.interview_configuration_service import configuration_labels
 from app.services.learning.aggregate import build_practice_cross_session_hints
@@ -116,7 +117,7 @@ def get_learning_context_for_session(*, user_id: int, session_id: str) -> dict[s
     if (
         current_outcome
         and is_eligible_learning_outcome(current_outcome)
-        and str(record.get("status", "")) == "completed"
+        and str(record.get("status", "")) == SessionState.COMPLETED.value
         and len(ordered_outcomes) >= 2
     ):
         for index, outcome in enumerate(ordered_outcomes):

@@ -62,6 +62,17 @@ def test_dimension_alias_rejects_missing_bucket() -> None:
         assert_required_dimensions(topics, interview_type="experienced")
 
 
+@pytest.mark.parametrize(('interview_type', 'dimensions'), [
+    ('experienced', ['Project Ownership', 'Technical Depth', 'System Design', 'Engineering Quality']),
+    ('campus', ['Technical Fundamentals', 'Internship Experience', 'Problem Analysis', 'Learning Potential']),
+])
+def test_english_dimensions_preserve_required_coverage(interview_type, dimensions) -> None:
+    topics = [{'name': dimension, 'dimension': dimension, 'focus_points': []} for dimension in dimensions]
+    assert_required_dimensions(topics, interview_type=interview_type)
+    with pytest.raises(PlanValidationError, match='必须维度未覆盖'):
+        assert_required_dimensions(topics[:-1], interview_type=interview_type)
+
+
 def test_deeper_diff_detects_focus_points_change() -> None:
     previous = {
         "plan_json": {

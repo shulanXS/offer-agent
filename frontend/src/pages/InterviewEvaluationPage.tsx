@@ -49,10 +49,10 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
   }
 
   return (
-    <div className="v2-eval-page">
-      <header className="v2-page-header v2-eval-header">
+    <div className="app-eval-page">
+      <header className="app-page-header app-eval-header">
         <div>
-          <button type="button" className="v2-eval-back-link" onClick={() => navigate('/interviews')}>
+          <button type="button" className="app-eval-back-link" onClick={() => navigate('/interviews')}>
             <ChevronLeft size={16} />
             {t('btn_back')}
           </button>
@@ -63,21 +63,21 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
       </header>
 
       {isGenerating ? (
-        <Card className="v2-panel v2-eval-loading">
-          <LoaderCircle className="v2-eval-spinner" size={28} />
+        <Card className="app-panel app-eval-loading">
+          <LoaderCircle className="app-eval-spinner" size={28} />
           <h3>{t('loading')}</h3>
           <p>{t('section_overview')}</p>
         </Card>
       ) : null}
 
       {!isGenerating && error ? (
-        <Card className="v2-panel v2-eval-error">
+        <Card className="app-panel app-eval-error">
           <h3>{t('degraded_banner_title')}</h3>
-          <p className="v2-error">{readError(error)}</p>
-          <div className="v2-eval-actions">
+          <p className="app-error">{readError(error)}</p>
+          <div className="app-eval-actions">
             <button
               type="button"
-              className="v2-btn-confirm"
+              className="app-btn-confirm"
               disabled={retryMutation.isPending}
               onClick={() => void handleRetry()}
             >
@@ -97,16 +97,27 @@ export function InterviewEvaluationPage({ token }: InterviewEvaluationPageProps)
       ) : null}
 
       {!isGenerating && !error && !report ? (
-        <Card className="v2-panel v2-eval-error">
-          <h3>—</h3>
-          <p>{retryHint || '—'}</p>
-          <button
-            type="button"
-            className="v2-btn-confirm"
-            onClick={() => navigate(`/interviews/${sessionId}/live`)}
-          >
-            {tc('back')}
-          </button>
+        // v2.3: 评估未生成（可能上一次后台失败）→ 暴露 retry 入口
+        <Card className="app-panel app-eval-error">
+          <h3>{tc('generating_title') || '—'}</h3>
+          <p>{retryHint || tc('generating_hint') || '—'}</p>
+          <div className="app-eval-error-actions">
+            <button
+              type="button"
+              className="app-btn-confirm"
+              onClick={() => void handleRetry()}
+              disabled={retryMutation.isPending}
+            >
+              {retryMutation.isPending ? tc('retrying') : tc('retry')}
+            </button>
+            <button
+              type="button"
+              className="app-btn-secondary"
+              onClick={() => navigate(`/interviews/${sessionId}/live`)}
+            >
+              {tc('back')}
+            </button>
+          </div>
         </Card>
       ) : null}
     </div>
@@ -140,25 +151,25 @@ function EvaluationReportView({
     <>
       {scorePresentation.degraded ? <DegradedBanner presentation={scorePresentation} /> : null}
 
-      <section className="v2-eval-section-wrap v2-eval-overview-section">
-        <Card className="v2-panel v2-eval-overview-card">
+      <section className="app-eval-section-wrap app-eval-overview-section">
+        <Card className="app-panel app-eval-overview-card">
           {scorePresentation.coverageNote ? (
-            <p className={`v2-eval-coverage-note v2-eval-overview-top-note${scorePresentation.isPartial ? ' partial' : ''}`}>
+            <p className={`app-eval-coverage-note app-eval-overview-top-note${scorePresentation.isPartial ? ' partial' : ''}`}>
               {scorePresentation.coverageNote}
             </p>
           ) : null}
 
-          <div className="v2-eval-overview-grid">
-            <div className="v2-eval-overview-score">
+          <div className="app-eval-overview-grid">
+            <div className="app-eval-overview-score">
               <ScoreRing score={report.overall_score} />
-              <p className="v2-eval-overview-score-label">{scorePresentation.scoreLabel}</p>
+              <p className="app-eval-overview-score-label">{scorePresentation.scoreLabel}</p>
             </div>
 
-            <div className="v2-eval-overview-summary">
-              <p className="v2-eval-overview-label">{t('section_overview')}</p>
-              <p className="v2-eval-overview-copy">{candidateReview?.summary}</p>
+            <div className="app-eval-overview-summary">
+              <p className="app-eval-overview-label">{t('section_overview')}</p>
+              <p className="app-eval-overview-copy">{candidateReview?.summary}</p>
               {scorePresentation.total > 0 ? (
-                <span className="v2-eval-overview-badge">
+                <span className="app-eval-overview-badge">
                   {t('coverage_topics_total', { total: scorePresentation.total })} ·{' '}
                   {t('coverage_topics_scored', { scored: scorePresentation.scored })}
                 </span>
@@ -200,7 +211,7 @@ function EvaluationReportView({
 
       {jdMatch ? <JdMatchSection jdMatch={jdMatch} /> : null}
 
-      <p className="v2-eval-footnote">Session ID: {sessionId}</p>
+      <p className="app-eval-footnote">Session ID: {sessionId}</p>
     </>
   )
 }

@@ -77,16 +77,12 @@ export interface RegeneratePlanRequest {
 }
 
 export const REGENERATION_STRATEGIES = [
-  { value: 'align_resume', label: '更贴合简历' },
-  { value: 'align_jd', label: '更贴合目标 JD', requiresJd: true },
-  { value: 'increase_technical_depth', label: '加强技术深度' },
-  { value: 'increase_fundamentals', label: '加强基础考察' },
-  { value: 'increase_practical_cases', label: '加强实战案例' },
-  { value: 'different_plan', label: '换一套计划' },
+  { value: 'align_resume', i18nKey: 'regen_strategy_align_resume' },
+  { value: 'align_jd', i18nKey: 'regen_strategy_align_jd', requiresJd: true },
+  { value: 'increase_technical_depth', i18nKey: 'regen_strategy_increase_technical_depth' },
+  { value: 'increase_fundamentals', i18nKey: 'regen_strategy_increase_fundamentals' },
+  { value: 'increase_practical_cases', i18nKey: 'regen_strategy_increase_practical_cases' },
+  { value: 'different_plan', i18nKey: 'regen_strategy_different_plan' },
 ] as const
 
 export type RegenerationStrategy = (typeof REGENERATION_STRATEGIES)[number]['value']
-
-export const REGENERATION_STRATEGY_LABELS: Record<string, string> = Object.fromEntries(
-  REGENERATION_STRATEGIES.map((item) => [item.value, item.label]),
-)

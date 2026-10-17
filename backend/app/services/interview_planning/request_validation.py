@@ -27,6 +27,10 @@ _ALLOWED_CONFIGURATION = {
     "target_level": {item["value"] for item in TARGET_LEVELS},
 }
 
+# v2.3: 面试语言白名单（en/zh）。C1 配置漂移根因。
+ALLOWED_INTERVIEW_LANGUAGES = {"en", "zh"}
+DEFAULT_INTERVIEW_LANGUAGE = "en"
+
 
 def validate_interview_configuration(payload: dict[str, Any], *, trace_id: str = "") -> dict[str, Any]:
     resume_id = str(payload.get("resume_id", "")).strip()
@@ -78,6 +82,21 @@ def validate_interview_configuration(payload: dict[str, Any], *, trace_id: str =
     # v2.2: 兼容旧字段 language，缺省视为空字符串
     language = str(payload.get("language", "")).strip() or "any"
 
+    # v2.3: interview_language 是新权威字段；白名单 {en, zh}，默认 en。
+    interview_language_raw = str(payload.get("interview_language", "")).strip().lower()
+    if not interview_language_raw:
+        interview_language = DEFAULT_INTERVIEW_LANGUAGE
+    elif interview_language_raw in ALLOWED_INTERVIEW_LANGUAGES:
+        interview_language = interview_language_raw
+    else:
+        raise_app_error(
+            400,
+            ErrorCode.INTERVIEW_LANGUAGE_INVALID,
+            f"interview_language 必须是 {sorted(ALLOWED_INTERVIEW_LANGUAGES)} 中的一个",
+            trace_id=trace_id,
+            details={"field": "interview_language", "value": interview_language_raw},
+        )
+
     duration_minutes = int(payload.get("duration_minutes", DEFAULT_DURATION_MINUTES) or DEFAULT_DURATION_MINUTES)
     if duration_minutes not in ALLOWED_DURATIONS:
         raise_app_error(
@@ -118,6 +137,7 @@ def validate_interview_configuration(payload: dict[str, Any], *, trace_id: str =
         "interview_type": interview_type,
         "target_role": target_role,
         "language": language,
+        "interview_language": interview_language,
         "target_level": target_level,
         "duration_minutes": duration_minutes,
         "focus_topics": focus_topics,

@@ -20,13 +20,13 @@ export function FeedbackSection({
 }) {
   const { t } = useTranslation('evaluation')
   return (
-    <section className="v2-eval-zone v2-eval-session-feedback-zone">
-      <Card className="v2-panel v2-eval-session-feedback-panel">
-        <div className="v2-eval-session-feedback-panel-head">
+    <section className="app-eval-zone app-eval-session-feedback-zone">
+      <Card className="app-panel app-eval-session-feedback-panel">
+        <div className="app-eval-session-feedback-panel-head">
           <h3>{t('feedback_title')}</h3>
           <p>{t('section_overview')}</p>
         </div>
-        <div className="v2-eval-session-feedback-columns">
+        <div className="app-eval-session-feedback-columns">
           <Column
             icon={<ThumbsUp size={18} />}
             title={t('section_strengths')}
@@ -65,10 +65,10 @@ function Column({
   itemIcons: readonly LucideIcon[]
 }) {
   return (
-    <div className={`v2-eval-session-feedback-column v2-eval-session-feedback-${tone}`}>
-      <div className="v2-eval-session-feedback-column-head">
+    <div className={`app-eval-session-feedback-column app-eval-session-feedback-${tone}`}>
+      <div className="app-eval-session-feedback-column-head">
         <span
-          className={`v2-eval-session-feedback-column-icon v2-eval-session-feedback-column-icon-${tone}`}
+          className={`app-eval-session-feedback-column-icon app-eval-session-feedback-column-icon-${tone}`}
           aria-hidden
         >
           {icon}
@@ -91,24 +91,24 @@ function FeedbackList({
   tone: 'highlight' | 'weakness'
   itemIcons: readonly LucideIcon[]
 }) {
-  if (!items.length) return <p className="v2-eval-empty-copy">{empty}</p>
+  if (!items.length) return <p className="app-eval-empty-copy">{empty}</p>
   return (
-    <ul className="v2-eval-feedback-detail-list">
+    <ul className="app-eval-feedback-detail-list">
       {items.map((item, index) => {
         const parsed = normalizeFeedbackEntry(item)
         const ItemIcon = itemIcons[index % itemIcons.length]
         return (
           <li
             key={`${parsed.title}-${index}`}
-            className={`v2-eval-feedback-detail-item v2-eval-feedback-detail-item-${tone}`}
+            className={`app-eval-feedback-detail-item app-eval-feedback-detail-item-${tone}`}
           >
             <span
-              className={`v2-eval-feedback-detail-topic-icon v2-eval-feedback-detail-topic-icon-${tone}`}
+              className={`app-eval-feedback-detail-topic-icon app-eval-feedback-detail-topic-icon-${tone}`}
               aria-hidden
             >
               <ItemIcon size={18} />
             </span>
-            <div className="v2-eval-feedback-detail-copy">
+            <div className="app-eval-feedback-detail-copy">
               <strong>{parsed.title}</strong>
               <p>{parsed.body}</p>
             </div>

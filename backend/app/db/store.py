@@ -45,7 +45,8 @@ def _loads(data: str | None, fallback: Any) -> Any:
 
 def init_db() -> None:
     with get_connection() as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
+        # PRAGMA WAL 会返回一行结果，先消费掉再 executescript
+        conn.execute("PRAGMA journal_mode=WAL").fetchone()
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA foreign_keys=ON")
@@ -144,12 +145,16 @@ def init_db() -> None:
                 ON learning_session_outcomes(user_id, resume_id, target_role, interview_type, completed_at ASC);
 
             CREATE TABLE IF NOT EXISTS session_locks (
-                session_id TEXT PRIMARY KEY,
+                lock_key TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                lock_type TEXT NOT NULL DEFAULT 'session',
                 lock_token TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(session_id) REFERENCES interview_sessions(id)
             );
+            CREATE INDEX IF NOT EXISTS idx_session_locks_session
+                ON session_locks(session_id);
 
             CREATE TABLE IF NOT EXISTS quota_audit (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,11 +177,31 @@ def init_db() -> None:
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 completed_at TEXT,
+                idempotency_key TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_payments_user_created
                 ON payments(user_id, created_at DESC);
+
+            -- v2.5：真实支付订单表
+            -- pending -> paid / failed / cancelled；只有 paid 后才入账（充 quota / 升订阅）
+            CREATE TABLE IF NOT EXISTS payment_orders (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                package TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                provider_order_id TEXT,
+                checkout_url TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                idempotency_key TEXT,
+                subject TEXT,
+                created_at TEXT NOT NULL,
+                paid_at TEXT,
+                metadata_json TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
             """
         )
         _ensure_column(conn, "interview_sessions", "resume_id", "TEXT")
@@ -186,14 +211,122 @@ def init_db() -> None:
         _ensure_column(conn, "messages", "request_id", "TEXT")
         # v2.2：充值相关列
         _ensure_column(conn, "users", "tier", "TEXT NOT NULL DEFAULT 'free'")
+        _ensure_column(conn, "payments", "idempotency_key", "TEXT")
+        _ensure_index(
+            conn,
+            "payments",
+            "uniq_payments_idem",
+            "CREATE UNIQUE INDEX uniq_payments_idem "
+            "ON payments(user_id, idempotency_key) "
+            "WHERE idempotency_key IS NOT NULL",
+        )
         _ensure_column(conn, "users", "subscription_expires_at", "TEXT")
+        # v2.3：聚合会员状态字段
+        # 单一权威源描述用户当前会员身份，避免前/后端各自计算 tier+expires_at
+        # 派生状态。详见改进方案 v2.3 §3.1。
+        _ensure_column(
+            conn,
+            "users",
+            "membership_status",
+            "TEXT NOT NULL DEFAULT 'free'",
+        )
+        # 老数据回填：订阅未过期 → active_subscription；订阅过期 → expired_subscription；
+        # 历史 paid 用户 → paid；其他保持 free。
+        conn.execute(
+            """
+            UPDATE users
+            SET membership_status = CASE
+                WHEN tier = 'subscription'
+                     AND subscription_expires_at IS NOT NULL
+                     AND datetime(subscription_expires_at) > datetime('now')
+                THEN 'active_subscription'
+                WHEN tier = 'subscription' THEN 'expired_subscription'
+                WHEN tier = 'paid' THEN 'paid'
+                ELSE membership_status
+            END
+            WHERE membership_status = 'free' AND (tier != 'free' OR subscription_expires_at IS NOT NULL)
+            """
+        )
+        # v2.3: session_locks 升级为 lock_key 主键 + lock_type 列
+        # 旧表 PK 是 session_id；新表 PK 是 lock_key。
+        # 这里简单做法：检测旧表存在 session_id 列则直接建新表 + 数据迁移。
+        _migrate_session_locks_v23(conn)
         _ensure_index(
             conn,
             "messages",
             "uniq_messages_request_id",
             "CREATE UNIQUE INDEX uniq_messages_request_id ON messages(session_id, request_id) WHERE request_id IS NOT NULL",
         )
+        _ensure_index(
+            conn,
+            "payment_orders",
+            "idx_payment_orders_user_created",
+            "CREATE INDEX idx_payment_orders_user_created ON payment_orders(user_id, created_at DESC)",
+        )
+        _ensure_index(
+            conn,
+            "payment_orders",
+            "uniq_payment_orders_idem",
+            "CREATE UNIQUE INDEX uniq_payment_orders_idem ON payment_orders(user_id, idempotency_key) "
+            "WHERE idempotency_key IS NOT NULL",
+        )
+        _ensure_index(
+            conn,
+            "payment_orders",
+            "idx_payment_orders_provider",
+            "CREATE INDEX idx_payment_orders_provider ON payment_orders(provider, provider_order_id)",
+        )
         conn.commit()
+
+
+def _migrate_session_locks_v23(conn: sqlite3.Connection) -> None:
+    """v2.3: 把 session_locks 从 (session_id PK) 迁移到 (lock_key PK, lock_type TEXT)。
+    旧 session_id 行 lock_type 默认 'session'，lock_key=session_id。
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_locks)").fetchall()}
+    if "lock_key" in cols:
+        return
+    if "session_id" in cols:
+        conn.execute(
+            """
+            CREATE TABLE session_locks__new (
+                lock_key TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                lock_type TEXT NOT NULL DEFAULT 'session',
+                lock_token TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO session_locks__new (lock_key, session_id, lock_type, lock_token, expires_at, created_at)
+            SELECT session_id, session_id, 'session', lock_token, expires_at, created_at
+            FROM session_locks
+            """
+        )
+        conn.execute("DROP TABLE session_locks")
+        conn.execute("ALTER TABLE session_locks__new RENAME TO session_locks")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_locks_session ON session_locks(session_id)"
+        )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_locks (
+                lock_key TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                lock_type TEXT NOT NULL DEFAULT 'session',
+                lock_token TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_locks_session ON session_locks(session_id)"
+        )
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -243,6 +376,19 @@ class Store:
         with get_connection() as conn:
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
+
+    def get_user_with_synced_membership(self, user_id: int) -> dict[str, Any] | None:
+        """v2.3：取用户前先做订阅状态同步。
+
+        - tier='subscription' 且 expires_at 已过 → membership_status='expired_subscription'，tier='free'
+        - 其他情况保持
+
+        返回同步后的 user dict（不入库；由 caller 决定是否需要持久化）。
+        """
+        user = self.get_user_by_id(user_id)
+        if not user:
+            return None
+        return self._sync_membership_in_memory(user)
 
     def update_user_password_hash(self, user_id: int, password_hash: str) -> None:
         with get_connection() as conn:
@@ -372,13 +518,17 @@ class Store:
         session_id: str | None,
         reason: str,
     ) -> dict[str, Any] | None:
-        """3.4：事务内原子扣减 + audit。v2.2 订阅有效 → 不扣，仅写一条 0 delta 审计便于追溯。"""
+        """3.4：事务内原子扣减 + audit。
+
+        v2.3：以 membership_status='active_subscription' 为无限语义权威，
+        跳过扣减（写 0-delta 审计便于追溯）。
+        """
         row = conn.execute(
-            "SELECT quota_remaining, tier, subscription_expires_at FROM users WHERE id = ?", (user_id,),
+            "SELECT quota_remaining, membership_status, subscription_expires_at FROM users WHERE id = ?",
+            (user_id,),
         ).fetchone()
         if not row:
             return None
-        # 订阅有效：不扣额度，但写一条 0 delta 审计便于追溯
         if self.is_subscription_active(dict(row)):
             conn.execute(
                 """
@@ -411,9 +561,10 @@ class Store:
         session_id: str | None,
         reason: str,
     ) -> None:
-        """3.4：事务内 +1 补偿。v2.2 订阅有效 → 不补偿。"""
+        """3.4：事务内 +1 补偿。v2.3 订阅有效 → 不补偿。"""
         row = conn.execute(
-            "SELECT tier, subscription_expires_at FROM users WHERE id = ?", (user_id,),
+            "SELECT membership_status, subscription_expires_at FROM users WHERE id = ?",
+            (user_id,),
         ).fetchone()
         if not row:
             return
@@ -877,48 +1028,49 @@ class Store:
         *,
         lock_token: str,
         ttl_seconds: int,
+        lock_type: str = "session",
+        lock_key: str | None = None,
     ) -> dict[str, Any] | None:
-        """1.3：分布式锁。返回 {lock_token, expires_at} 或 None（已被他人持有）。
+        """v2.3: 分布式锁，lock_key 形如 '{type}:{session_id}'。
 
         - 同 token 视为可重入（幂等返回该锁的 expires_at）。
         - 异 token + 未过期 → None（冲突）。
         - 异 token + 已过期 → 抢锁成功。
         """
         now_ts = _now()
-        # 用 ISO 字符串比较；过期判定：now_ts >= expires_at
         from datetime import datetime, timezone, timedelta
 
         now_dt = datetime.now(timezone.utc)
         expires_at = (now_dt + timedelta(seconds=ttl_seconds)).isoformat()
+        key = lock_key or f"{lock_type}:{session_id}"
 
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT lock_token, expires_at FROM session_locks WHERE session_id = ?",
-                (session_id,),
+                "SELECT lock_token, expires_at FROM session_locks WHERE lock_key = ?",
+                (key,),
             ).fetchone()
             if row is None:
                 try:
                     conn.execute(
                         """
-                        INSERT INTO session_locks (session_id, lock_token, expires_at, created_at)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO session_locks (lock_key, session_id, lock_type, lock_token, expires_at, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
                         """,
-                        (session_id, lock_token, expires_at, now_ts),
+                        (key, session_id, lock_type, lock_token, expires_at, now_ts),
                     )
                     conn.commit()
                 except sqlite3.IntegrityError:
-                    # 并发：另一个线程抢先 INSERT；视为冲突。
                     conn.rollback()
                     fresh = conn.execute(
-                        "SELECT lock_token, expires_at FROM session_locks WHERE session_id = ?",
-                        (session_id,),
+                        "SELECT lock_token, expires_at FROM session_locks WHERE lock_key = ?",
+                        (key,),
                     ).fetchone()
                     if fresh is not None:
                         existing_dt = datetime.fromisoformat(str(fresh["expires_at"]))
                         remaining = max(0, int((existing_dt - now_dt).total_seconds()))
-                        return {"locked": True, "remaining_seconds": remaining}
-                    return {"locked": True, "remaining_seconds": ttl_seconds}
-                return {"lock_token": lock_token, "expires_at": expires_at}
+                        return {"locked": True, "remaining_seconds": remaining, "lock_type": lock_type}
+                    return {"locked": True, "remaining_seconds": ttl_seconds, "lock_type": lock_type}
+                return {"lock_token": lock_token, "expires_at": expires_at, "lock_type": lock_type}
             existing_token = str(row["lock_token"])
             existing_expires = str(row["expires_at"])
             existing_dt = datetime.fromisoformat(existing_expires)
@@ -926,28 +1078,43 @@ class Store:
                 conn.execute(
                     """
                     UPDATE session_locks
-                    SET lock_token = ?, expires_at = ?, created_at = ?
-                    WHERE session_id = ?
+                    SET lock_token = ?, expires_at = ?, created_at = ?, lock_type = ?
+                    WHERE lock_key = ?
                     """,
-                    (lock_token, expires_at, now_ts, session_id),
+                    (lock_token, expires_at, now_ts, lock_type, key),
                 )
                 conn.commit()
-                return {"lock_token": lock_token, "expires_at": expires_at}
+                return {"lock_token": lock_token, "expires_at": expires_at, "lock_type": lock_type}
             remaining = max(0, int((existing_dt - now_dt).total_seconds()))
-            return {"locked": True, "remaining_seconds": remaining}
+            return {"locked": True, "remaining_seconds": remaining, "lock_type": lock_type}
 
-    def release_session_lock(self, session_id: str, *, lock_token: str) -> bool:
+    def release_session_lock(
+        self,
+        session_id: str,
+        *,
+        lock_token: str,
+        lock_type: str = "session",
+        lock_key: str | None = None,
+    ) -> bool:
+        key = lock_key or f"{lock_type}:{session_id}"
         with get_connection() as conn:
             cursor = conn.execute(
-                "DELETE FROM session_locks WHERE session_id = ? AND lock_token = ?",
-                (session_id, lock_token),
+                "DELETE FROM session_locks WHERE lock_key = ? AND lock_token = ?",
+                (key, lock_token),
             )
             conn.commit()
             return cursor.rowcount > 0
 
     def refresh_session_lock(
-        self, session_id: str, *, lock_token: str, ttl_seconds: int,
+        self,
+        session_id: str,
+        *,
+        lock_token: str,
+        ttl_seconds: int,
+        lock_type: str = "session",
+        lock_key: str | None = None,
     ) -> bool:
+        key = lock_key or f"{lock_type}:{session_id}"
         with get_connection() as conn:
             from datetime import datetime, timezone, timedelta
 
@@ -956,19 +1123,32 @@ class Store:
                 """
                 UPDATE session_locks
                 SET expires_at = ?
-                WHERE session_id = ? AND lock_token = ?
+                WHERE lock_key = ? AND lock_token = ?
                 """,
-                (expires_at, session_id, lock_token),
+                (expires_at, key, lock_token),
             )
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_session_lock(self, session_id: str) -> dict[str, Any] | None:
+    def get_session_lock(
+        self,
+        session_id: str,
+        *,
+        lock_type: str = "session",
+        lock_key: str | None = None,
+    ) -> dict[str, Any] | None:
+        key = lock_key or f"{lock_type}:{session_id}"
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM session_locks WHERE session_id = ?", (session_id,),
+                "SELECT * FROM session_locks WHERE lock_key = ?", (key,),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_session_lock_by_type(
+        self, session_id: str, lock_type: str,
+    ) -> dict[str, Any] | None:
+        """按 lock_type 查锁（兼容旧代码直接用 session_id 查的语义）。"""
+        return self.get_session_lock(session_id, lock_type=lock_type)
 
     def list_resumes(self, user_id: int) -> list[dict[str, Any]]:
         with get_connection() as conn:
@@ -1018,6 +1198,38 @@ class Store:
     ) -> dict[str, Any] | None:
         """A2 公开接口：按 (session_id, request_id) 查找消息。"""
         return self._find_message_by_request_id(session_id, request_id)
+
+    def find_message_pair_by_request_id(
+        self, session_id: str, request_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """v2.3: 按 (session_id, request_id) 找到 user_message 和其紧邻的下一条 assistant_message。
+
+        关键点：用 seq 配对，避免 `_latest_assistant_message` 拿陈旧消息。
+        返回 (user_message, assistant_message)；任一缺失时对应项为 None。
+        """
+        user = self._find_message_by_request_id(session_id, request_id)
+        if not user:
+            return None, None
+        with get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM messages
+                WHERE session_id = ? AND seq = ? AND role = 'assistant'
+                """,
+                (session_id, int(user["seq"]) + 1),
+            ).fetchone()
+        if not row:
+            return user, None
+        return user, {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "seq": row["seq"],
+            "role": row["role"],
+            "kind": row["kind"],
+            "content": row["content"],
+            "created_at": row["created_at"],
+            "meta": _loads(row["meta_json"], {}),
+        }
 
     def _find_message_by_request_id(
         self, session_id: str, request_id: str
@@ -1276,30 +1488,51 @@ class Store:
         amount_cents: int,
         interviews_granted: int,
         status: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """记录一笔支付（mock 也走审计表）。"""
+        """记录一笔支付（mock 也走审计表）。
+
+        v2.4：支持 `idempotency_key`，同一 (user, key) 唯一约束；重复提交时
+        返回首次支付记录，避免双扣。
+        """
         timestamp = _now()
         with get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO payments (
-                    id, user_id, package, amount_cents, interviews_granted,
-                    status, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    payment_id,
-                    user_id,
-                    package,
-                    amount_cents,
-                    interviews_granted,
-                    status,
-                    timestamp,
-                    timestamp if status == "succeeded" else None,
-                ),
-            )
-            conn.commit()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO payments (
+                        id, user_id, package, amount_cents, interviews_granted,
+                        status, created_at, completed_at, idempotency_key
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        payment_id,
+                        user_id,
+                        package,
+                        amount_cents,
+                        interviews_granted,
+                        status,
+                        timestamp,
+                        timestamp if status == "succeeded" else None,
+                        idempotency_key,
+                    ),
+                )
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001
+                if idempotency_key and "uniq_payments_idem" in str(exc):
+                    existing = self._find_payment_by_idempotency(user_id, idempotency_key)
+                    if existing:
+                        return existing
+                raise
         return self.get_payment(payment_id)
+
+    def _find_payment_by_idempotency(self, user_id: int, key: str) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM payments WHERE user_id = ? AND idempotency_key = ?",
+                (user_id, key),
+            ).fetchone()
+        return dict(row) if row else None
 
     def get_payment(self, payment_id: str) -> dict[str, Any] | None:
         with get_connection() as conn:
@@ -1322,21 +1555,28 @@ class Store:
         interviews_granted: int,
         subscription_expires_at: str | None,
     ) -> dict[str, Any] | None:
-        """单事务内：更新用户 tier / quota / subscription_expires_at。
-        `package == 'subscription'` 写到 subscription_expires_at；
-        `package == 'single'` 把 quota_remaining += interviews_granted 并把 tier 升级为 paid。
+        """v2.3：单事务更新用户 tier / quota / subscription_expires_at / membership_status。
+
+        `package == 'subscription'`：tier='subscription'，membership_status='active_subscription'，
+                                     subscription_expires_at 写入；quota 不变。
+        `package == 'single'`：quota += interviews_granted；若现 membership_status 是
+                                'active_subscription'，保持；否则升级为 'paid'。
         """
         from app.db.transaction import with_retry
 
         def _do() -> dict[str, Any] | None:
             with get_connection() as conn:
-                row = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+                row = conn.execute(
+                    "SELECT id, membership_status FROM users WHERE id = ?", (user_id,),
+                ).fetchone()
                 if not row:
                     return None
+                current_status = str(row["membership_status"] or "free")
                 if package == "subscription":
                     conn.execute(
                         """
                         UPDATE users SET tier = 'subscription',
+                                         membership_status = 'active_subscription',
                                          subscription_expires_at = ?,
                                          updated_at = ?
                         WHERE id = ?
@@ -1344,23 +1584,89 @@ class Store:
                         (subscription_expires_at, _now(), user_id),
                     )
                 else:  # single
-                    conn.execute(
-                        """
-                        UPDATE users SET tier = CASE WHEN tier = 'subscription' THEN tier ELSE 'paid' END,
-                                         quota_remaining = quota_remaining + ?,
-                                         updated_at = ?
-                        WHERE id = ?
-                        """,
-                        (interviews_granted, _now(), user_id),
-                    )
+                    # 仅在「非活跃订阅」时才升级为 paid；订阅期内单包购买只加 quota
+                    if current_status == "active_subscription":
+                        conn.execute(
+                            """
+                            UPDATE users SET quota_remaining = quota_remaining + ?,
+                                             updated_at = ?
+                            WHERE id = ?
+                            """,
+                            (interviews_granted, _now(), user_id),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            UPDATE users SET tier = 'paid',
+                                             membership_status = 'paid',
+                                             quota_remaining = quota_remaining + ?,
+                                             updated_at = ?
+                            WHERE id = ?
+                            """,
+                            (interviews_granted, _now(), user_id),
+                        )
                 conn.commit()
             return self.get_user_by_id(user_id)
 
         return with_retry(_do)
 
+    def sync_subscription_status(self, user_id: int) -> dict[str, Any] | None:
+        """v2.3：把过期订阅降级为 expired_subscription，清 tier='subscription'。
+
+        在 get_user_by_id 后调用；如发现需要降级，立即持久化并返回最新 user。
+        其他情况直接返回原 user。
+        """
+        from app.db.transaction import with_retry
+
+        user = self.get_user_by_id(user_id)
+        if not user:
+            return None
+        if not self._is_subscription_expired(user):
+            return user
+        # 需要降级
+        def _do() -> dict[str, Any] | None:
+            with get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE users SET tier = 'free',
+                                     membership_status = 'expired_subscription',
+                                     updated_at = ?
+                    WHERE id = ? AND (
+                        membership_status = 'active_subscription'
+                        OR tier = 'subscription'
+                    )
+                    """,
+                    (_now(), user_id),
+                )
+                conn.commit()
+            return self.get_user_by_id(user_id)
+        return with_retry(_do)
+
+    def _is_subscription_expired(self, user: dict[str, Any]) -> bool:
+        """判断订阅是否已过期（与 is_subscription_active 互补）。"""
+        if user.get("membership_status") == "active_subscription":
+            # 仍按 expires_at 二次校验
+            expires_at = user.get("subscription_expires_at")
+            if not expires_at:
+                return True
+            try:
+                ts = expires_at.replace("Z", "+00:00")
+                return datetime.fromisoformat(ts) <= datetime.now(timezone.utc)
+            except (ValueError, TypeError):
+                return True
+        return False
+
+    def _sync_membership_in_memory(self, user: dict[str, Any]) -> dict[str, Any]:
+        """v2.3：内存中同步 membership_status，不入库。供 get_user_with_synced_membership 使用。"""
+        if self._is_subscription_expired(user):
+            user = dict(user)
+            user["membership_status"] = "expired_subscription"
+            user["tier"] = "free"
+        return user
+
     def is_subscription_active(self, user: dict[str, Any]) -> bool:
-        """判断用户是否处于有效订阅期。"""
-        if user.get("tier") != "subscription":
+        """v2.3：以 membership_status 为权威，expires_at 仅作二次校验。"""
+        if user.get("membership_status") != "active_subscription":
             return False
         expires_at = user.get("subscription_expires_at")
         if not expires_at:
@@ -1372,8 +1678,124 @@ class Store:
         except (ValueError, TypeError):
             return False
 
-    def effective_quota_remaining(self, user: dict[str, Any]) -> int:
-        """订阅有效 → 大数；否则取 quota_remaining。"""
+    def effective_quota_remaining(self, user: dict[str, Any]) -> int | None:
+        """v2.3：订阅有效 → None（=无限）；否则返回真实剩余。
+
+        返回 None 由 Pydantic schema / 前端识别为"无限"语义。
+        """
         if self.is_subscription_active(user):
-            return 10_000
+            return None
         return int(user.get("quota_remaining", 0))
+
+    # ------------------------------------------------------------------
+    # v2.5 真实支付订单 (Payment Orders)
+    # ------------------------------------------------------------------
+    def create_order(
+        self,
+        *,
+        order_id: str,
+        user_id: int,
+        package: str,
+        amount_cents: int,
+        provider: str,
+        subject: str,
+        idempotency_key: str | None = None,
+        provider_order_id: str | None = None,
+        checkout_url: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """创建一笔支付订单。
+
+        若带 `idempotency_key` 且同 (user, key) 已存在订单则直接返回旧单，
+        避免重复下单。pending / paid 状态都视为"已存在"，由调用方决定下一步。
+        """
+        timestamp = _now()
+        with get_connection() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO payment_orders (
+                        id, user_id, package, amount_cents, provider,
+                        provider_order_id, checkout_url, status,
+                        idempotency_key, subject, created_at, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                    """,
+                    (
+                        order_id,
+                        user_id,
+                        package,
+                        amount_cents,
+                        provider,
+                        provider_order_id or order_id,
+                        checkout_url,
+                        idempotency_key,
+                        subject,
+                        timestamp,
+                        json.dumps(metadata or {}, ensure_ascii=False),
+                    ),
+                )
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001
+                if idempotency_key and "uniq_payment_orders_idem" in str(exc):
+                    existing = self._find_order_by_idempotency(user_id, idempotency_key)
+                    if existing:
+                        return existing
+                raise
+        return self.get_order(order_id) or {}
+
+    def _find_order_by_idempotency(self, user_id: int, key: str) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM payment_orders WHERE user_id = ? AND idempotency_key = ?",
+                (user_id, key),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_order(self, order_id: str) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM payment_orders WHERE id = ?", (order_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_order_for_user(self, order_id: str, user_id: int) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM payment_orders WHERE id = ? AND user_id = ?",
+                (order_id, user_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def find_order_by_provider_id(
+        self, provider: str, provider_order_id: str
+    ) -> dict[str, Any] | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM payment_orders WHERE provider = ? AND provider_order_id = ?",
+                (provider, provider_order_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_order_status(
+        self,
+        *,
+        order_id: str,
+        status: str,
+        paid_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        """更新订单状态。允许 pending -> paid / failed / cancelled 的状态机。"""
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE payment_orders SET status = ?, paid_at = COALESCE(?, paid_at) WHERE id = ?",
+                (status, paid_at, order_id),
+            )
+            conn.commit()
+        return self.get_order(order_id)
+
+    def list_orders_for_user(self, user_id: int) -> list[dict[str, Any]]:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM payment_orders WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]

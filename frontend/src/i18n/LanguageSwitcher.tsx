@@ -4,6 +4,7 @@ import { Globe, Languages } from 'lucide-react'
 
 export function LanguageSwitcher() {
   const { i18n, t } = useTranslation('sidebar')
+  const { t: ti } = useTranslation('interview')
   const current = (i18n.language || 'en').split('-')[0]
   const isZh = current === 'zh'
 
@@ -13,32 +14,32 @@ export function LanguageSwitcher() {
   }
 
   return (
-    <div className="v2-lang-switcher-prominent" role="group" aria-label={t('language')}>
-      <Languages size={16} aria-hidden="true" className="v2-lang-switcher-icon" />
+    <div className="app-lang-switcher-prominent" role="group" aria-label={t('language')}>
+      <Languages size={16} aria-hidden="true" className="app-lang-switcher-icon" />
       <button
         type="button"
-        className={`v2-lang-option${!isZh ? ' v2-lang-option-active' : ''}`}
+        className={`app-lang-option${!isZh ? ' app-lang-option-active' : ''}`}
         onClick={() => changeTo('en')}
         aria-pressed={!isZh}
-        title={isZh ? 'Switch to English' : '当前语言：English'}
+        title={isZh ? ti('lang_switcher_switch_to_en') : ti('lang_switcher_current_en')}
       >
-        <span className="v2-lang-emoji" aria-hidden="true">🇺🇸</span>
+        <span className="app-lang-emoji" aria-hidden="true">🇺🇸</span>
         <span>EN</span>
-        {!isZh ? <span className="v2-lang-pill-current" aria-hidden="true">●</span> : null}
+        {!isZh ? <span className="app-lang-pill-current" aria-hidden="true">●</span> : null}
       </button>
-      <span className="v2-lang-sep" aria-hidden="true">|</span>
+      <span className="app-lang-sep" aria-hidden="true">|</span>
       <button
         type="button"
-        className={`v2-lang-option${isZh ? ' v2-lang-option-active' : ''}`}
+        className={`app-lang-option${isZh ? ' app-lang-option-active' : ''}`}
         onClick={() => changeTo('zh')}
         aria-pressed={isZh}
-        title={isZh ? '当前语言：中文' : 'Switch to 中文'}
+        title={isZh ? ti('lang_switcher_current_zh') : ti('lang_switcher_switch_to_zh')}
       >
-        <span className="v2-lang-emoji" aria-hidden="true">🇨🇳</span>
-        <span>中文</span>
-        {isZh ? <span className="v2-lang-pill-current" aria-hidden="true">●</span> : null}
+        <span className="app-lang-emoji" aria-hidden="true">🇨🇳</span>
+        <span>{ti('lang_option_zh')}</span>
+        {isZh ? <span className="app-lang-pill-current" aria-hidden="true">●</span> : null}
       </button>
-      <Globe size={14} aria-hidden="true" className="v2-lang-switcher-globe" />
+      <Globe size={14} aria-hidden="true" className="app-lang-switcher-globe" />
     </div>
   )
 }

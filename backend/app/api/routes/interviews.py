@@ -1,16 +1,24 @@
+from __future__ import annotations
+
+import asyncio
+import json
+
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.rate_limit import limiter, LLM_LIMIT
+from app.core.security import decode_access_token
 from app.core.streaming import SSE_RESPONSE_HEADERS
+from app.db.store import Store
 from app.schemas import ReplyInterviewRequest
 from app.schemas.interview_plan import (
     CreateInterviewRequest,
     InterviewPlanPreviewResponse,
     RegeneratePlanRequest,
 )
+from app.services.events import bus, evaluation_channel
 from app.services.interview_planning_service import InterviewPlanningService
 from app.services.interview_agent_service import InterviewAgentService
 from app.services.interview_evaluation_service import InterviewEvaluationService
@@ -147,3 +155,61 @@ async def reply_interview_stream(
         media_type="text/event-stream",
         headers=SSE_RESPONSE_HEADERS,
     )
+
+
+@router.get("/{session_id}/events/stream")
+async def interview_events_stream(
+    session_id: str,
+    request: Request,
+    token: str | None = None,
+) -> StreamingResponse:
+    """v2.3: 面试事件 SSE 流，订阅 evaluation_done / future 其他域事件。
+
+    EventSource 不支持自定义 header，所以支持 `?token=xxx` 鉴权（仅 SSE 使用）。
+    Bearer 头也存在时优先用 Bearer。
+    """
+    auth_header = request.headers.get("authorization", "")
+    bearer_token: str | None = None
+    if auth_header.lower().startswith("bearer "):
+        bearer_token = auth_header[7:].strip()
+    elif token:
+        bearer_token = token
+
+    if not bearer_token:
+        raise_app_error(401, ErrorCode.AUTH_REQUIRED, "缺少登录凭证")
+
+    import jwt as _jwt
+
+    try:
+        payload = decode_access_token(bearer_token)
+    except _jwt.PyJWTError as exc:  # pragma: no cover
+        raise_app_error(401, ErrorCode.AUTH_INVALID, "登录状态已失效", details={"reason": str(exc.__class__.__name__)})
+
+    user = Store().get_user_by_id(int(payload["sub"]))
+    if not user:
+        raise_app_error(401, ErrorCode.USER_NOT_FOUND, "用户不存在")
+    _require_v2_session(user["id"], session_id)
+
+    channel = evaluation_channel(session_id)
+    queue = await bus.subscribe(channel)
+
+    async def gen():
+        try:
+            # 立即送一个 ready 事件，前端 EventSource 不会阻塞首屏
+            yield "event: ready\ndata: {\"status\":\"connected\"}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # 心跳保活
+                    yield ": ping\n\n"
+                    continue
+                yield f"event: {event.get('type', 'message')}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") in {"evaluation_done"}:
+                    break
+        finally:
+            await bus.unsubscribe(channel, queue)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_RESPONSE_HEADERS)

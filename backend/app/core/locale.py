@@ -5,6 +5,11 @@
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastapi import Request
+
 SUPPORTED = ("en", "zh")
 DEFAULT = "en"
 
@@ -20,3 +25,11 @@ def parse_accept_language(value: str | None) -> str:
         if primary in SUPPORTED:
             return primary
     return DEFAULT
+
+
+def resolve_locale(request: "Request") -> str:
+    """v2.5: 从 request.state.locale / Accept-Language 解析 locale。"""
+    state_locale = getattr(request.state, "locale", None)
+    if state_locale in SUPPORTED:
+        return state_locale
+    return parse_accept_language(request.headers.get("accept-language"))

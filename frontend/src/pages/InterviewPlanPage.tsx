@@ -65,7 +65,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
   if (isLoading) {
     return (
       <>
-        <header className="v2-page-header">
+        <header className="app-page-header">
           <div>
             <h2>{t('plan_title')}</h2>
             <p>{tc('loading')}</p>
@@ -79,15 +79,15 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
   if (error || !plan) {
     return (
       <>
-        <header className="v2-page-header">
+        <header className="app-page-header">
           <div>
             <h2>{t('plan_title')}</h2>
-            <p className="v2-error">{error ? (error instanceof Error ? error.message : tc('request_failed')) : '—'}</p>
+            <p className="app-error">{error ? (error instanceof Error ? error.message : tc('request_failed')) : '—'}</p>
           </div>
           <InterviewHeaderArt />
         </header>
-        <div className="v2-plan-action-bar">
-          <button type="button" className="v2-text-button" onClick={() => navigate('/interviews/new')}>
+        <div className="app-plan-action-bar">
+          <button type="button" className="app-text-button" onClick={() => navigate('/interviews/new')}>
             {tc('back')}
           </button>
         </div>
@@ -102,12 +102,12 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
 
   return (
     <>
-      <header className="v2-page-header">
+      <header className="app-page-header">
         <div>
-          <div className="v2-title-row">
+          <div className="app-title-row">
             <h2>{t('plan_title')}</h2>
             {isLocked ? (
-              <Badge variant="secondary" className="v2-plan-locked-badge">
+              <Badge variant="secondary" className="app-plan-locked-badge">
                 <Lock size={14} />
                 {t('plan_status_confirmed')}
               </Badge>
@@ -118,14 +118,14 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
         <InterviewHeaderArt />
       </header>
 
-      {actionError ? <p className="v2-error v2-plan-action-error">{actionError}</p> : null}
+      {actionError ? <p className="app-error app-plan-action-error">{actionError}</p> : null}
 
       {canRegenerate || canConfirm || isLocked ? (
-        <div className="v2-plan-action-bar">
+        <div className="app-plan-action-bar">
           {canRegenerate ? (
             <button
               type="button"
-              className="v2-btn-regenerate"
+              className="app-btn-regenerate"
               disabled={regenerateMutation.isPending || isStarting}
               onClick={() => setRegenerateDialogOpen(true)}
             >
@@ -136,7 +136,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
           {canConfirm ? (
             <button
               type="button"
-              className="v2-btn-confirm"
+              className="app-btn-confirm"
               disabled={regenerateMutation.isPending || isStarting}
               onClick={handleConfirmAndStart}
             >
@@ -145,17 +145,17 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
             </button>
           ) : null}
           {isLocked ? (
-            <button type="button" className="v2-btn-confirm" disabled={isStarting} onClick={handleConfirmAndStart}>
+            <button type="button" className="app-btn-confirm" disabled={isStarting} onClick={handleConfirmAndStart}>
               {isStarting ? tc('submitting') : t('btn_confirm')}
             </button>
           ) : null}
         </div>
       ) : null}
 
-      <section className="v2-plan-layout">
-        <Card className="v2-panel v2-plan-summary">
-          <div className="v2-section-heading">
-            <span className="v2-section-icon">
+      <section className="app-plan-layout">
+        <Card className="app-panel app-plan-summary">
+          <div className="app-section-heading">
+            <span className="app-section-icon">
               <Sparkles />
             </span>
             <div>
@@ -169,7 +169,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
             </div>
           </div>
 
-          <div className="v2-plan-meta-grid">
+          <div className="app-plan-meta-grid">
             <MetaItem label={tInterview('label_interview_type')} value={summary.interview_type_label} />
             <MetaItem label={tInterview('label_target_role')} value={summary.target_role_label} />
             <MetaItem label={tInterview('label_language')} value={summary.language_label} />
@@ -178,9 +178,9 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
             <MetaItem label="JD" value={summary.has_jd ? 'YES' : 'NO'} />
           </div>
 
-          <div className="v2-plan-focus-block">
+          <div className="app-plan-focus-block">
             <span>{t('plan_topics')}</span>
-            <div className="v2-focus-options">
+            <div className="app-focus-options">
               {summary.focus_topics.map((topic) => (
                 <Badge key={topic} variant="secondary">
                   {topic}
@@ -189,7 +189,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
             </div>
           </div>
 
-          <div className="v2-plan-reference-block">
+          <div className="app-plan-reference-block">
             <span>{t('plan_candidate_summary')}</span>
             <ul>
               {summary.reference_summary.map((item) => (
@@ -199,10 +199,10 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
           </div>
         </Card>
 
-        <div className="v2-plan-main-column">
-          <Card className="v2-panel v2-plan-topics">
-            <div className="v2-section-heading v2-plan-topics-heading">
-              <span className="v2-section-icon">
+        <div className="app-plan-main-column">
+          <Card className="app-panel app-plan-topics">
+            <div className="app-section-heading app-plan-topics-heading">
+              <span className="app-section-icon">
                 <ClipboardList />
               </span>
               <div>
@@ -211,20 +211,20 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
                   {plan.topics_preview.length} total, {requiredCount} required
                 </p>
               </div>
-              <span className="v2-plan-duration-chip">
+              <span className="app-plan-duration-chip">
                 <CalendarClock size={15} />
                 {tc('minutes', { count: 45 })}
               </span>
             </div>
 
-            <div className="v2-plan-topic-list">
+            <div className="app-plan-topic-list">
               {plan.topics_preview.map((topic, index) => (
-                <article key={topic.id} className="v2-plan-topic-item">
-                  <div className="v2-plan-topic-index">{index + 1}</div>
-                  <div className="v2-plan-topic-body">
-                    <div className="v2-plan-topic-title">
+                <article key={topic.id} className="app-plan-topic-item">
+                  <div className="app-plan-topic-index">{index + 1}</div>
+                  <div className="app-plan-topic-body">
+                    <div className="app-plan-topic-title">
                       <h4>{topic.name}</h4>
-                      <Badge variant="secondary" className={topic.required ? 'v2-badge-required' : undefined}>
+                      <Badge variant="secondary" className={topic.required ? 'app-badge-required' : undefined}>
                         {topic.required ? 'REQUIRED' : 'OPTIONAL'}
                       </Badge>
                     </div>
@@ -268,7 +268,7 @@ export function InterviewPlanPage({ token }: InterviewPlanPageProps) {
 
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="v2-plan-meta-item">
+    <div className="app-plan-meta-item">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>

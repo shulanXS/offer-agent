@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import Any
 
+from app.core.config import settings
 from app.core.errors import ErrorCode, raise_app_error
 from app.core.events import commit_event
 from app.core.logging_utils import log_payload, new_trace_id
 from app.db.store import Store
+from app.services.events import bus, evaluation_channel
 from app.services.interview_evaluation.context import build_evaluation_context
 from app.services.interview_evaluation.minimal_report import build_minimal_evaluation_report
 from app.services.interview_evaluation.report import build_evidence_driven_report
@@ -39,6 +42,40 @@ class InterviewEvaluationService:
                 trace_id=trace_id,
             )
 
+        # v2.3: 评估分布式锁（同 session_locks 表，lock_type='evaluation'）。
+        # TTL = LLM_TIMEOUT_SECONDS（最坏情况）。锁冲突时：
+        #   - 现有 evaluation record → 直接返回
+        #   - 否则 409
+        lock_token = uuid.uuid4().hex
+        llm_timeout = int(getattr(settings, "llm_timeout_seconds", 60))
+        acquire = self.store.acquire_session_lock(
+            session_id,
+            lock_token=lock_token,
+            ttl_seconds=llm_timeout,
+            lock_type="evaluation",
+        )
+        if acquire is None or acquire.get("locked"):
+            # 锁被他人持有：复用当前 evaluation record（如已有）或 409
+            existing = self._get_v2_record(user_id, session_id)
+            if existing["status"] == "completed" and existing.get("evaluation"):
+                return self._build_response(existing)
+            raise_app_error(
+                409,
+                ErrorCode.SESSION_NOT_ACTIVE,
+                "评估正在生成中，请稍后再试",
+                trace_id=trace_id,
+            )
+
+        try:
+            return self._do_evaluate(user_id, session_id, record, trace_id)
+        finally:
+            self.store.release_session_lock(
+                session_id, lock_token=lock_token, lock_type="evaluation",
+            )
+
+    def _do_evaluate(
+        self, user_id: int, session_id: str, record: dict[str, Any], trace_id: str,
+    ) -> dict[str, Any]:
         started = time.perf_counter()
         evaluation = self._generate_report(record, trace_id=trace_id)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -84,6 +121,19 @@ class InterviewEvaluationService:
             overall_score=evaluation.get("overall_score"),
             elapsed_ms=elapsed_ms,
         )
+        # v2.3: 推 SSE evaluation_done 事件，订阅者立即拿到
+        try:
+            bus.publish_nowait(
+                evaluation_channel(session_id),
+                {
+                    "type": "evaluation_done",
+                    "session_id": session_id,
+                    "status": "completed",
+                    "trace_id": trace_id,
+                },
+            )
+        except Exception:
+            logger.exception("event bus publish evaluation_done failed: session_id=%s", session_id)
         return self._build_response(updated)
 
     def get_evaluation(self, user_id: int, session_id: str) -> dict[str, Any] | None:

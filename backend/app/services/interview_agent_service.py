@@ -308,14 +308,19 @@ class InterviewAgentService:
 
         # 1.3：分布式锁。request_id 缺失时用 trace_id 当 token。
         lock_token = f"reply:{trace_id}"
-        lock = self.store.acquire_session_lock(session_id, lock_token=lock_token, ttl_seconds=LOCK_TTL_SECONDS)
+        lock = self.store.acquire_session_lock(
+            session_id,
+            lock_token=lock_token,
+            ttl_seconds=LOCK_TTL_SECONDS,
+            lock_type="session",
+        )
         if lock is None or lock.get("locked"):
             raise_app_error(409, ErrorCode.INTERVIEW_REPLY_IN_PROGRESS, "上一条回答仍在处理中，请稍候", trace_id=trace_id)
 
         try:
             return self._process_reply(user_id, session_id, answer, trace_id)
         finally:
-            self.store.release_session_lock(session_id, lock_token=lock_token)
+            self.store.release_session_lock(session_id, lock_token=lock_token, lock_type="session")
 
     def _process_reply(self, user_id: int, session_id: str, answer: str, trace_id: str) -> dict[str, Any]:
         record = self._get_session_record(user_id, session_id)
@@ -456,24 +461,41 @@ class InterviewAgentService:
 
         # 1.3：分布式锁。request_id 优先作为 lock_token。
         lock_token = request_id or f"reply:{trace_id}"
-        lock = self.store.acquire_session_lock(session_id, lock_token=lock_token, ttl_seconds=LOCK_TTL_SECONDS)
+        lock = self.store.acquire_session_lock(
+            session_id,
+            lock_token=lock_token,
+            ttl_seconds=LOCK_TTL_SECONDS,
+            lock_type="session",
+        )
         if lock is None or lock.get("locked"):
             raise_app_error(409, ErrorCode.INTERVIEW_REPLY_IN_PROGRESS, "上一条回答仍在处理中，请稍候", trace_id=trace_id)
 
-        # 幂等：同 request_id 复用 user_message
+        # 幂等：同 request_id 复用 user_message + 配对的 assistant_message（v2.3）
         if request_id:
-            existing = self.store.find_message_by_request_id(session_id, request_id)
-            if existing and existing.get("role") == "user":
-                assistant_message = self._latest_assistant_message(user_id, session_id)
+            user_msg, assistant_msg = self.store.find_message_pair_by_request_id(
+                session_id, request_id,
+            )
+            if user_msg and user_msg.get("role") == "user":
+                if not assistant_msg:
+                    # 还没有 assistant（可能上一次中断），回退到 user_message 上下文
+                    self.store.release_session_lock(session_id, lock_token=lock_token, lock_type="session")
+                    raise_app_error(
+                        409,
+                        ErrorCode.INTERVIEW_REPLY_IN_PROGRESS,
+                        "上一条回答还在处理中，请稍候重试",
+                        trace_id=trace_id,
+                    )
                 updated = self._get_session_record(user_id, session_id)
                 queue: "asyncio.Queue[str]" = asyncio.Queue()
-                await queue.put(assistant_message.get("content", ""))
+                await queue.put(assistant_msg.get("content", ""))
                 await queue.put("__DONE__")
-                self.store.release_session_lock(session_id, lock_token=lock_token)
+                self.store.release_session_lock(
+                    session_id, lock_token=lock_token, lock_type="session",
+                )
                 return {
                     "session": self._serialize_live(updated, start_clock=False),
-                    "user_message": existing,
-                    "assistant_message": assistant_message,
+                    "user_message": user_msg,
+                    "assistant_message": assistant_msg,
                     "decision": {},
                     "supports_streaming": False,
                 }, queue
@@ -528,7 +550,7 @@ class InterviewAgentService:
             )
         except Exception:
             logger.exception("reply_to_interview_streaming failed, releasing lock")
-            self.store.release_session_lock(session_id, lock_token=lock_token)
+            self.store.release_session_lock(session_id, lock_token=lock_token, lock_type="session")
             raise
 
         outcome_runtime = dict(outcome.runtime_state)
@@ -570,9 +592,9 @@ class InterviewAgentService:
                     workflow_state=outcome_runtime,
                 )
         except Exception:
-            self.store.release_session_lock(session_id, lock_token=lock_token)
+            self.store.release_session_lock(session_id, lock_token=lock_token, lock_type="session")
             raise
-        self.store.release_session_lock(session_id, lock_token=lock_token)
+        self.store.release_session_lock(session_id, lock_token=lock_token, lock_type="session")
         updated = self._get_session_record(user_id, session_id)
 
         payload = {
@@ -609,6 +631,8 @@ class InterviewAgentService:
                     "detail": str(exc),
                 },
             )
+            # v2.3: error 事件后立即结束 generator，避免 client 误认为仍有更多事件。
+            return
 
     async def _stream_reply_result(self, payload: dict[str, Any]) -> AsyncIterator[str]:
         session = payload["session"]

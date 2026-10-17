@@ -20,3 +20,22 @@ def force_llm_failures_for_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "llm_provider", "openai", raising=False)
     monkeypatch.setattr(settings, "llm_model", "gpt-4o-mini", raising=False)
     patch_failing_llm_client(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """每个测试前清空 slowapi 进程内计数器，避免跨测试累积触发 429。"""
+    from app.core.rate_limit import limiter
+
+    storage = getattr(limiter, "_storage", None)
+    if storage is not None:
+        # limits.memory.MemoryStorage 内部用 events/expirations 字典；直接清掉
+        for attr in ("events", "expirations"):
+            if hasattr(storage, attr) and isinstance(getattr(storage, attr), dict):
+                getattr(storage, attr).clear()
+        # 兼容：调用 clear(None) 尝试
+        try:
+            storage.clear(None)
+        except (TypeError, NotImplementedError):
+            pass
+    yield

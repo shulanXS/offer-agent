@@ -20,6 +20,8 @@
   "regenerate_focus_label": "重点考察",
   "regenerate_additional_label": "补充说明",
   "regenerate_submit": "重新生成",
+  "regenerate_last_attempt": "最后一次调整机会：提交后将无法再修改。",
+  "regenerate_remaining_hint": "本次调整后还可再调整 {{count}} 次。（剩余 {{remaining}} 次）",
   "plan_status_draft": "草稿",
   "plan_status_confirmed": "已确认",
   "plan_status_superseded": "已替代"

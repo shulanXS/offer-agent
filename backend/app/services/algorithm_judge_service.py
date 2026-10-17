@@ -60,6 +60,10 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+# v2.3: 判题白名单语言 + 错误码分离
+ALLOWED_JUDGE_LANGUAGES = {"python", "javascript", "typescript", "go", "java", "cpp", "c", "rust", "ruby"}
+
+
 def list_problems() -> list[dict[str, Any]]:
     return list_problem_summaries()
 
@@ -67,7 +71,8 @@ def list_problems() -> list[dict[str, Any]]:
 def get_problem(pid: str) -> dict[str, Any]:
     p = get_problem_by_id(pid)
     if not p:
-        raise_app_error(404, ErrorCode.RESUME_NOT_FOUND, "未找到该算法题")
+        # v2.3: 改用专门的算法题错误码
+        raise_app_error(404, ErrorCode.ALGORITHM_PROBLEM_NOT_FOUND, "未找到该算法题")
     # 隐藏测试不返回
     return {
         "id": p["id"],
@@ -86,25 +91,44 @@ def judge_submission(
 ) -> dict[str, Any]:
     problem = get_problem_by_id(problem_id)
     if not problem:
-        raise_app_error(404, ErrorCode.RESUME_NOT_FOUND, "未找到该算法题")
-    if not code.strip():
-        raise_app_error(400, ErrorCode.VALIDATION_ERROR, "代码不能为空")
+        raise_app_error(404, ErrorCode.ALGORITHM_PROBLEM_NOT_FOUND, "未找到该算法题")
+    if not (code or "").strip():
+        raise_app_error(400, ErrorCode.JUDGE_CODE_INVALID, "代码不能为空")
+
+    # v2.3: language 白名单校验
+    normalized_language = (language or "python").strip().lower()
+    if normalized_language not in ALLOWED_JUDGE_LANGUAGES:
+        raise_app_error(
+            400,
+            ErrorCode.JUDGE_LANGUAGE_UNSUPPORTED,
+            f"暂不支持的判题语言: {language}",
+            details={"allowed": sorted(ALLOWED_JUDGE_LANGUAGES)},
+        )
 
     user_prompt = (
         f"Problem:\n{problem['prompt']}\n\n"
         f"Function signature:\n{problem['function_signature']}\n\n"
         f"Hidden tests (input/expected):\n"
         f"{json.dumps(problem['hidden_tests'], ensure_ascii=False, indent=2)}\n\n"
-        f"Candidate's code ({language}):\n```\n{code}\n```\n\n"
+        f"Candidate's code ({normalized_language}):\n```\n{code}\n```\n\n"
         f"Return JSON only."
     )
 
     client = create_llm_client(provider=None)
-    text = client.generate_text(
-        prompt=user_prompt,
-        system_prompt=_JUDGE_SYSTEM_PROMPT,
-        operation_name="algorithm_judge",
-    )
+    try:
+        text = client.generate_text(
+            prompt=user_prompt,
+            system_prompt=_JUDGE_SYSTEM_PROMPT,
+            operation_name="algorithm_judge",
+        )
+    except Exception as exc:  # v2.3: 错误码分离
+        logger.exception("algorithm_judge LLM call failed: problem_id=%s", problem_id)
+        raise_app_error(
+            500,
+            ErrorCode.JUDGE_EXECUTION_FAILED,
+            "判题服务执行失败，请稍后重试",
+            details={"reason": str(exc)},
+        )
 
     parsed = _extract_json_object(text or "")
     if not parsed:

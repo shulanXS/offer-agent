@@ -140,19 +140,19 @@ export interface EvaluateInterviewResponse {
   evaluation: InterviewEvaluationReport
 }
 
-export const EVALUATION_PRACTICE_PRIORITY_LABELS: Record<EvaluationPracticeRecommendation['priority'], string> = {
-  high: '优先练习',
-  medium: '建议巩固',
+export const EVALUATION_PRACTICE_PRIORITY_I18N_KEYS: Record<EvaluationPracticeRecommendation['priority'], string> = {
+  high: 'practice_priority_high',
+  medium: 'practice_priority_medium',
 }
 
-export const EVALUATION_COMPETENCY_STATUS_LABELS: Record<EvaluationCompetencyStatus, string> = {
-  verified: '表现较好',
-  partially_verified: '有亮点待加强',
-  unverified: '讨论不足',
+export const EVALUATION_COMPETENCY_STATUS_I18N_KEYS: Record<EvaluationCompetencyStatus, string> = {
+  verified: 'competency_status_verified',
+  partially_verified: 'competency_status_partially_verified',
+  unverified: 'competency_status_unverified',
 }
 
-export const EVALUATION_SOURCE_LABELS: Record<string, string> = {
-  evidence_rule: '证据驱动评分',
-  agent_enriched: 'Agent 增强报告',
-  rule_minimal: '规则版最小报告',
+export const EVALUATION_SOURCE_I18N_KEYS: Record<string, string> = {
+  evidence_rule: 'source_evidence_rule',
+  agent_enriched: 'source_agent_enriched',
+  rule_minimal: 'source_rule_minimal',
 }

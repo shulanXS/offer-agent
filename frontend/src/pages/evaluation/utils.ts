@@ -22,17 +22,17 @@ export const DIMENSION_TAB_ICONS: readonly LucideIcon[] = [
 export const HIGHLIGHT_ITEM_ICONS: readonly LucideIcon[] = [Target, MessageSquare, Sparkles, Code2, Layers3]
 export const WEAKNESS_ITEM_ICONS: readonly LucideIcon[] = [Network, BarChart3, Search, Route, ClipboardList]
 
-const COVERAGE_STATUS_LABELS: Record<EvaluationCompetencyStatus | 'low', string> = {
-  verified: '已评',
-  partially_verified: '部分评',
-  unverified: '未评',
-  low: '未达标',
+const COVERAGE_STATUS_I18N_KEYS: Record<EvaluationCompetencyStatus | 'low', string> = {
+  verified: 'competency_status_verified',
+  partially_verified: 'competency_status_partially_verified',
+  unverified: 'competency_status_unverified',
+  low: 'competency_status_low',
 }
 
-const JdMatchStatusLabels: Record<'aligned' | 'risk' | 'unverified', string> = {
-  aligned: '已验证',
-  risk: '有风险',
-  unverified: '尚未验证',
+const JdMatchStatusI18nKeys: Record<'aligned' | 'risk' | 'unverified', string> = {
+  aligned: 'jd_match_status_aligned',
+  risk: 'jd_match_status_risk',
+  unverified: 'jd_match_status_unverified',
 }
 
 export type OverviewCoverageStatus = EvaluationCompetencyStatus | 'low'
@@ -64,12 +64,18 @@ export function coverageBarWidth(status: OverviewCoverageStatus): number {
   return 0
 }
 
-export function coverageLabel(status: OverviewCoverageStatus): string {
-  return COVERAGE_STATUS_LABELS[status]
+export function coverageLabel(
+  status: OverviewCoverageStatus,
+  t: (key: string) => string = (key) => key,
+): string {
+  return t(COVERAGE_STATUS_I18N_KEYS[status])
 }
 
-export function jdStatusLabel(status: 'aligned' | 'risk' | 'unverified'): string {
-  return JdMatchStatusLabels[status]
+export function jdStatusLabel(
+  status: 'aligned' | 'risk' | 'unverified',
+  t: (key: string) => string = (key) => key,
+): string {
+  return t(JdMatchStatusI18nKeys[status])
 }
 
 export interface JdMatchListItem {

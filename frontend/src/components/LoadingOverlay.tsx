@@ -16,11 +16,11 @@ export function LoadingOverlay({ open, message, hideLabel = false }: LoadingOver
   }
 
   return createPortal(
-    <div className="v2-loading-overlay" role="status" aria-live="polite" aria-busy="true">
-      <div className="v2-loading-overlay-card">
-        <Loader2 className="v2-loading-overlay-spinner" size={28} aria-hidden="true" />
-        {hideLabel ? null : <p className="v2-loading-overlay-label">Loading</p>}
-        <p className="v2-loading-overlay-message">{message}</p>
+    <div className="app-loading-overlay" role="status" aria-live="polite" aria-busy="true">
+      <div className="app-loading-overlay-card">
+        <Loader2 className="app-loading-overlay-spinner" size={28} aria-hidden="true" />
+        {hideLabel ? null : <p className="app-loading-overlay-label">Loading</p>}
+        <p className="app-loading-overlay-message">{message}</p>
       </div>
     </div>,
     document.body,

@@ -1,6 +1,7 @@
 // D3：跨场次对比
 import { Card } from '@/components/ui/card'
 import { Minus, TrendingDown, TrendingUp } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { LearningContextResponse } from '@/types/interviewLearning'
 import type { InterviewEvaluationReport } from '@/types/interviewEvaluation'
 
@@ -11,6 +12,7 @@ export function SessionComparisonSection({
   context: LearningContextResponse
   currentReport?: InterviewEvaluationReport | null
 }) {
+  const { t } = useTranslation('evaluation')
   const comparison = context.session_comparison
   const previousOverallScore = context.previous_overall_score
   const currentOverallScore = currentReport?.overall_score ?? null
@@ -26,29 +28,31 @@ export function SessionComparisonSection({
     : 'same'
 
   return (
-    <section className="v2-eval-zone">
-      <Card className="v2-panel v2-eval-cross-session-panel">
-        <div className="v2-eval-cross-session-panel-head">
-          <div className="v2-eval-cross-session-panel-head-row">
-            <h3>与上一场对比</h3>
+    <section className="app-eval-zone">
+      <Card className="app-panel app-eval-cross-session-panel">
+        <div className="app-eval-cross-session-panel-head">
+          <div className="app-eval-cross-session-panel-head-row">
+            <h3>{t('comparison_title')}</h3>
             {summaryTag ? (
-              <span className={`v2-eval-cross-session-head-tag v2-eval-cross-session-head-tag-${summaryTone}`}>
+              <span className={`app-eval-cross-session-head-tag app-eval-cross-session-head-tag-${summaryTone}`}>
                 {summaryTag}
               </span>
             ) : null}
           </div>
           <p>
-            已模拟 {context.session_count} 场 · {context.target_role_label || context.target_role} ·{' '}
-            {context.interview_type_label || context.interview_type}
-            。对比基于你的历史模拟，不影响本场评分。
+            {t('comparison_summary_intro', {
+              count: context.session_count,
+              role: context.target_role_label || context.target_role,
+              type: context.interview_type_label || context.interview_type,
+            })}
           </p>
         </div>
 
-        <div className="v2-eval-cross-session-body">
-          <div className="v2-eval-cross-session-layout">
+        <div className="app-eval-cross-session-body">
+          <div className="app-eval-cross-session-layout">
             {hasScoreComparison ? (
-              <div className="v2-eval-cross-session-coverage-panel">
-                <p className="v2-eval-cross-session-panel-title">总分对比</p>
+              <div className="app-eval-cross-session-coverage-panel">
+                <p className="app-eval-cross-session-panel-title">{t('comparison_score_label')}</p>
                 <ScoreComparisonRow
                   previousScore={previousOverallScore!}
                   currentScore={currentOverallScore!}
@@ -56,39 +60,39 @@ export function SessionComparisonSection({
               </div>
             ) : null}
             {comparison?.points.length ? (
-              <div className="v2-eval-cross-session-coverage-panel">
-                <p className="v2-eval-cross-session-panel-title">{coverage?.label || '已考察方向'}</p>
-                <div className="v2-eval-cross-session-coverage-compare">
-                  <div className="v2-eval-cross-session-coverage-side">
-                    <span className="v2-eval-cross-session-coverage-label">上一场</span>
-                    <strong className="v2-eval-cross-session-coverage-value">
+              <div className="app-eval-cross-session-coverage-panel">
+                <p className="app-eval-cross-session-panel-title">{coverage?.label || t('comparison_coverage_fallback')}</p>
+                <div className="app-eval-cross-session-coverage-compare">
+                  <div className="app-eval-cross-session-coverage-side">
+                    <span className="app-eval-cross-session-coverage-label">{t('comparison_previous')}</span>
+                    <strong className="app-eval-cross-session-coverage-value">
                       {coverage?.baseline_count ?? 0}
                     </strong>
-                    <span className="v2-eval-cross-session-coverage-unit">个</span>
+                    <span className="app-eval-cross-session-coverage-unit">{t('comparison_unit_topic')}</span>
                   </div>
-                  <div className="v2-eval-cross-session-coverage-ring" aria-hidden="true">
+                  <div className="app-eval-cross-session-coverage-ring" aria-hidden="true">
                     <TrendingUp size={22} />
                   </div>
-                  <div className="v2-eval-cross-session-coverage-side current">
-                    <span className="v2-eval-cross-session-coverage-label">本场</span>
-                    <strong className="v2-eval-cross-session-coverage-value">
+                  <div className="app-eval-cross-session-coverage-side current">
+                    <span className="app-eval-cross-session-coverage-label">{t('comparison_current')}</span>
+                    <strong className="app-eval-cross-session-coverage-value">
                       {coverage?.current_count ?? 0}
                     </strong>
-                    <span className="v2-eval-cross-session-coverage-unit">个</span>
+                    <span className="app-eval-cross-session-coverage-unit">{t('comparison_unit_topic')}</span>
                   </div>
                 </div>
               </div>
             ) : null}
 
             {comparison?.points.length ? (
-              <div className="v2-eval-cross-session-changes-panel">
-                <ul className="v2-eval-cross-session-change-list">
+              <div className="app-eval-cross-session-changes-panel">
+                <ul className="app-eval-cross-session-change-list">
                   {comparison.points.map((point) => (
                     <li
                       key={`${point.category}-${point.headline}`}
-                      className={`v2-eval-cross-session-change-item v2-eval-cross-session-change-item-${point.tone}`}
+                      className={`app-eval-cross-session-change-item app-eval-cross-session-change-item-${point.tone}`}
                     >
-                      <div className="v2-eval-cross-session-change-icon">
+                      <div className="app-eval-cross-session-change-icon">
                         {point.tone === 'better' ? (
                           <TrendingUp size={16} />
                         ) : point.tone === 'worse' ? (
@@ -97,7 +101,7 @@ export function SessionComparisonSection({
                           <Minus size={16} />
                         )}
                       </div>
-                      <span className="v2-eval-cross-session-change-line">
+                      <span className="app-eval-cross-session-change-line">
                         {formatComparisonPointLine(point)}
                       </span>
                     </li>
@@ -119,18 +123,20 @@ function ScoreComparisonRow({
   previousScore: number
   currentScore: number
 }) {
+  const { t } = useTranslation('evaluation')
   const delta = Math.round(currentScore - previousScore)
   const tone: 'better' | 'worse' | 'same' =
     delta > 0 ? 'better' : delta < 0 ? 'worse' : 'same'
-  const verb = tone === 'better' ? '提升' : tone === 'worse' ? '下降' : '持平'
+  const verbKey = tone === 'better' ? 'comparison_verb_better' : tone === 'worse' ? 'comparison_verb_worse' : 'comparison_verb_same'
+  const verb = t(verbKey)
   return (
-    <div className="v2-eval-cross-session-coverage-compare">
-      <div className="v2-eval-cross-session-coverage-side">
-        <span className="v2-eval-cross-session-coverage-label">上一场</span>
-        <strong className="v2-eval-cross-session-coverage-value">{previousScore}</strong>
-        <span className="v2-eval-cross-session-coverage-unit">分</span>
+    <div className="app-eval-cross-session-coverage-compare">
+      <div className="app-eval-cross-session-coverage-side">
+        <span className="app-eval-cross-session-coverage-label">{t('comparison_previous')}</span>
+        <strong className="app-eval-cross-session-coverage-value">{previousScore}</strong>
+        <span className="app-eval-cross-session-coverage-unit">{t('comparison_unit_score')}</span>
       </div>
-      <div className="v2-eval-cross-session-coverage-ring" aria-hidden="true">
+      <div className="app-eval-cross-session-coverage-ring" aria-hidden="true">
         {tone === 'better' ? (
           <TrendingUp size={22} />
         ) : tone === 'worse' ? (
@@ -139,16 +145,16 @@ function ScoreComparisonRow({
           <Minus size={22} />
         )}
       </div>
-      <div className="v2-eval-cross-session-coverage-side current">
-        <span className="v2-eval-cross-session-coverage-label">本场</span>
-        <strong className="v2-eval-cross-session-coverage-value">{currentScore}</strong>
-        <span className="v2-eval-cross-session-coverage-unit">分</span>
+      <div className="app-eval-cross-session-coverage-side current">
+        <span className="app-eval-cross-session-coverage-label">{t('comparison_current')}</span>
+        <strong className="app-eval-cross-session-coverage-value">{currentScore}</strong>
+        <span className="app-eval-cross-session-coverage-unit">{t('comparison_unit_score')}</span>
       </div>
       <span
-        className={`v2-eval-cross-session-head-tag v2-eval-cross-session-head-tag-${tone}`}
-        aria-label={`${verb} ${Math.abs(delta)} 分`}
+        className={`app-eval-cross-session-head-tag app-eval-cross-session-head-tag-${tone}`}
+        aria-label={t('comparison_delta_aria', { verb, count: Math.abs(delta) })}
       >
-        {tone === 'same' ? verb : `${verb} ${Math.abs(delta)} 分`}
+        {tone === 'same' ? verb : t('comparison_delta_text', { verb, count: Math.abs(delta) })}
       </span>
     </div>
   )

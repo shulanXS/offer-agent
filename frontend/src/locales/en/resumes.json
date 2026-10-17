@@ -18,5 +18,18 @@
   "resume_summary": "Summary",
   "skills": "Skills",
   "experience": "Experience",
-  "education": "Education"
+  "education": "Education",
+  "preview_personal_summary": "Personal summary",
+  "preview_highlights": "Highlights",
+  "preview_skills": "Technical skills",
+  "preview_work": "Work experience",
+  "preview_projects": "Projects",
+  "preview_raw_text": "View extracted raw text",
+  "preview_model_label": "Parser model",
+  "preview_model_default": "Default model",
+  "preview_model_unrecorded": "Unrecorded",
+  "preview_updated_at": "Updated",
+  "preview_empty_text": "Not available",
+  "preview_no_detail": "No details",
+  "preview_fallback_name": "Entry {{n}}"
 }

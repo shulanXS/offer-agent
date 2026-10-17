@@ -4,7 +4,7 @@ import * as React from "react"
 import { AlertDialog as AlertDialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 
 function AlertDialog({
   ...props
@@ -147,21 +147,25 @@ function AlertDialogDescription({
   )
 }
 
+type ButtonVariantProps = {
+  variant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
+  size?: "default" | "sm" | "lg" | "icon"
+}
+
 function AlertDialogAction({
   className,
   variant = "default",
   size = "default",
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Action> &
-  Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Action> & ButtonVariantProps) {
+  // v2.3: 直接用 buttonVariants + AlertDialogPrimitive.Action，
+  // 不再嵌套 <Button asChild>（避免 data-slot 冲突 / ref warning）。
   return (
-    <Button variant={variant} size={size} asChild>
-      <AlertDialogPrimitive.Action
-        data-slot="alert-dialog-action"
-        className={cn(className)}
-        {...props}
-      />
-    </Button>
+    <AlertDialogPrimitive.Action
+      data-slot="alert-dialog-action"
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
   )
 }
 
@@ -170,16 +174,13 @@ function AlertDialogCancel({
   variant = "outline",
   size = "default",
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Cancel> &
-  Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Cancel> & ButtonVariantProps) {
   return (
-    <Button variant={variant} size={size} asChild>
-      <AlertDialogPrimitive.Cancel
-        data-slot="alert-dialog-cancel"
-        className={cn(className)}
-        {...props}
-      />
-    </Button>
+    <AlertDialogPrimitive.Cancel
+      data-slot="alert-dialog-cancel"
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
   )
 }
 

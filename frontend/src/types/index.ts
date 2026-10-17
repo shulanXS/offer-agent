@@ -11,7 +11,7 @@ export type {
   RegeneratePlanRequest,
   RegenerationStrategy,
 } from './interviewPlan'
-export { REGENERATION_STRATEGIES, REGENERATION_STRATEGY_LABELS } from './interviewPlan'
+export { REGENERATION_STRATEGIES } from './interviewPlan'
 export type {
   LiveInterviewProgress,
   LiveInterviewSessionDetail,
@@ -30,9 +30,9 @@ export type {
   InterviewEvaluationReport,
 } from './interviewEvaluation'
 export {
-  EVALUATION_COMPETENCY_STATUS_LABELS,
-  EVALUATION_PRACTICE_PRIORITY_LABELS,
-  EVALUATION_SOURCE_LABELS,
+  EVALUATION_COMPETENCY_STATUS_I18N_KEYS,
+  EVALUATION_PRACTICE_PRIORITY_I18N_KEYS,
+  EVALUATION_SOURCE_I18N_KEYS,
 } from './interviewEvaluation'
 export type {
   InterviewListDisplayLabel,

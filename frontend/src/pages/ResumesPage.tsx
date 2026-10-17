@@ -3,11 +3,12 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-import { CheckCircle2, Clock3, FileText, Info, Plus, Trash2 } from 'lucide-react'
+import { CheckCircle2, Clock3, FileText, LogIn, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ResumePreviewPanel } from '../components/ResumePreviewPanel'
-import { SellingHighlights } from '../components/SellingHighlights'
+import { ReleaseLog } from '../components/ReleaseLog'
+import { useLocale } from '@/i18n/useLocale'
 import type { ResumeSummary } from '../types'
 import { formatDateTime, formatResumeMeta, getResumeBadge, MAX_RESUME_COUNT, type ResumeCardItem } from '../utils/resume'
 
@@ -34,6 +35,7 @@ export function ResumesPage({
 }: ResumesPageProps) {
   const { t } = useTranslation('resumes')
   const { t: tc } = useTranslation('common')
+  const locale = useLocale()
   const [deleteTarget, setDeleteTarget] = useState<ResumeCardItem | null>(null)
 
   function closeDeleteDialog() {
@@ -44,43 +46,41 @@ export function ResumesPage({
 
   return (
     <>
-      <header className="v2-page-header">
+      <header className="app-page-header">
         <div>
-          <div className="v2-title-row">
+          <div className="app-title-row">
             <h2>{t('page_title')}</h2>
           </div>
           <p>{t('page_subtitle')}</p>
         </div>
-        <div className="v2-hero-art" aria-hidden="true">
-          <div className="v2-hero-doc doc-a" />
-          <div className="v2-hero-doc doc-b" />
-          <div className="v2-hero-cube">AI</div>
+        <div className="app-hero-art" aria-hidden="true">
+          <div className="app-hero-doc doc-a" />
+          <div className="app-hero-doc doc-b" />
+          <div className="app-hero-cube">AI</div>
         </div>
       </header>
 
-      <section className="v2-page-intro">
-        <SellingHighlights />
-      </section>
-
-      {error ? <p className="v2-error">{error}</p> : null}
-      <section className="v2-resume-page">
-        <div className="v2-resume-page-header">
+      {error ? <p className="app-error">{error}</p> : null}
+      <div className="app-resume-layout">
+        <div className="app-resume-main">
+          <section className="app-resume-page">
+        <div className="app-resume-page-header">
           <h3>
             Resume List <span>{resumes.length}/{MAX_RESUME_COUNT}</span>
           </h3>
         </div>
-        <div className="v2-resume-grid">
+        <div className="app-resume-grid">
           {resumes.map((resume) => (
             <Card
               key={resume.id}
-              className={`v2-resume-card ${selectedResume?.id === resume.id ? 'active' : ''} ${
+              className={`app-resume-card ${selectedResume?.id === resume.id ? 'active' : ''} ${
                 resume.parse_status === 'processing' ? 'processing' : ''
               }`}
             >
-              <div className="v2-resume-actions">
+              <div className="app-resume-actions">
                 <button
                   type="button"
-                  className="v2-resume-card-delete"
+                  className="app-resume-card-delete"
                   aria-label={`Delete ${resume.filename}`}
                   disabled={deletingResumeId === resume.id || resume.parse_status === 'processing'}
                   onClick={() => setDeleteTarget(resume)}
@@ -90,21 +90,21 @@ export function ResumesPage({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="v2-ghost-compact"
+                  className="app-ghost-compact"
                   type="button"
                   disabled={resume.parse_status !== 'ready'}
                   onClick={() => void onResumeSelect(resume.id)}
                 >
-                  View
+                  {tc('view')}
                 </Button>
               </div>
-              <div className="v2-resume-card-icon">
+              <div className="app-resume-card-icon">
                 <FileText />
-                <span className="v2-resume-badge">{getResumeBadge(resume.filename)}</span>
+                <span className="app-resume-badge">{getResumeBadge(resume.filename)}</span>
               </div>
-              <div className="v2-resume-card-main">
+              <div className="app-resume-card-main">
                 <strong>{resume.filename}</strong>
-                <div className="v2-resume-skills">
+                <div className="app-resume-skills">
                   {resume.parse_status === 'processing' ? (
                     <Badge variant="secondary">{t('status_processing')}</Badge>
                   ) : resume.technical_skills.length > 0 ? (
@@ -122,10 +122,10 @@ export function ResumesPage({
                   {resume.parse_status === 'processing' ? t('extracting') : formatResumeMeta(resume)}
                 </p>
               </div>
-              <div className="v2-resume-card-footer">
-                <div className="v2-resume-status">
+              <div className="app-resume-card-footer">
+                <div className="app-resume-status">
                   {resume.parse_status === 'processing' ? (
-                    <span className="v2-resume-spinner" aria-hidden="true" />
+                    <span className="app-resume-spinner" aria-hidden="true" />
                   ) : (
                     <CheckCircle2 />
                   )}
@@ -136,7 +136,7 @@ export function ResumesPage({
               </div>
             </Card>
           ))}
-          <Label className={`v2-resume-upload-card ${isExtracting ? 'disabled' : ''}`}>
+          <Label className={`app-resume-upload-card ${isExtracting ? 'disabled' : ''}`}>
             <input
               type="file"
               accept=".pdf,.txt,.md,.doc,.docx"
@@ -146,29 +146,38 @@ export function ResumesPage({
                 event.currentTarget.value = ''
               }}
             />
-            <span className="v2-resume-upload-plus">
+            <span className="app-resume-upload-plus">
               <Plus />
             </span>
-            <strong>{isExtracting ? t('extracting') : t('upload_button')}</strong>
+            <strong>
+              {isExtracting ? t('extracting') : t('upload_button')}
+            </strong>
             <p>{t('upload_hint')}</p>
           </Label>
         </div>
         {selectedResume ? (
-          <div className="v2-resume-page-tip">
+          <div className="app-resume-page-tip">
             {t('status_ready')}: {selectedResume.filename}
           </div>
         ) : (
-          <div className="v2-resume-page-tip">{t('empty_state')}</div>
+          <div className="app-resume-page-tip">{t('empty_state')}</div>
         )}
         {selectedResume ? (
-          <ResumePreviewPanel resume={selectedResume} updatedAtText={formatDateTime(selectedResume.updated_at)} />
+          <ResumePreviewPanel
+            resume={selectedResume}
+            updatedAtText={formatDateTime(selectedResume.updated_at, locale)}
+          />
         ) : null}
-        <div className="v2-resume-hint">
-          <Info />
-          {t('empty_state')}
+          </section>
         </div>
-      </section>
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => (!open ? closeDeleteDialog() : undefined)}>
+        <aside className="app-resume-side">
+          <ReleaseLog />
+        </aside>
+      </div>
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => (!open ? closeDeleteDialog() : undefined)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('delete_confirm_title')}</AlertDialogTitle>
@@ -177,7 +186,7 @@ export function ResumesPage({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(deletingResumeId)}>{tc('cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              className="v2-dialog-confirm"
+              className="app-dialog-confirm"
               disabled={Boolean(deletingResumeId)}
               onClick={(event) => {
                 event.preventDefault()

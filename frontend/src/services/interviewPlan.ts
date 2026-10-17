@@ -7,13 +7,14 @@ import type {
 } from '@/types/interviewPlan'
 
 export function createInterview(token: string, payload: InterviewConfigurationDraft) {
+  // v2.3: 透传用户选中的 duration_minutes / interview_language；
+  // 不再硬编码 45。
   return requestJson<InterviewPlanPreview>(
     '/api/interviews',
     {
       method: 'POST',
       body: JSON.stringify({
         ...payload,
-        duration_minutes: 45,
         jd_text: payload.jd_text ?? '',
       }),
     },

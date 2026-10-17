@@ -72,15 +72,55 @@ export function formatResumeMeta(resume: ResumeSummary) {
   return i18n.t('resumes:updated_at', { time: updatedAtText })
 }
 
+// v2.3: 简历 processing 状态持久化（防止刷新页面丢失）
+const PROCESSING_STORAGE_KEY = 'resumes.processing_ids'
+
+export function persistProcessingIds(ids: string[]): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    if (ids.length === 0) {
+      sessionStorage.removeItem(PROCESSING_STORAGE_KEY)
+      return
+    }
+    sessionStorage.setItem(PROCESSING_STORAGE_KEY, JSON.stringify(ids))
+  } catch {
+    // 静默：隐私模式可能抛错
+  }
+}
+
+export function loadPersistedProcessingIds(): string[] {
+  try {
+    if (typeof sessionStorage === 'undefined') return []
+    const raw = sessionStorage.getItem(PROCESSING_STORAGE_KEY)
+    if (!raw) return []
+    const arr = JSON.parse(raw) as unknown
+    if (!Array.isArray(arr)) return []
+    return arr.filter((x): x is string => typeof x === 'string')
+  } catch {
+    return []
+  }
+}
+
 export function formatDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
     return value || '—'
   }
+  // v2.3: 显式 Asia/Shanghai（产品定位中国用户），保留 i18n 区域。
   return date.toLocaleString(bcp47ForIntl(currentLocale()), {
+    timeZone: resolveTimezone(),
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function resolveTimezone(): string {
+  try {
+    // 默认按产品定位（中国用户）；用户浏览器时区暂不覆盖。
+    return 'Asia/Shanghai'
+  } catch {
+    return 'UTC'
+  }
 }

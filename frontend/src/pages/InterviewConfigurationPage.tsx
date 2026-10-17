@@ -85,12 +85,20 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
     if (!options) return
     setInterviewType(getInitialValue(options.interview_types, 'experienced'))
     setTargetRole(getInitialValue(options.target_roles, 'backend'))
+    setCustomTargetRole('')  // v2.3: 重新加载 options 时清空残留
     setTargetLevel(getInitialValue(options.target_levels, 'intermediate'))
     const durOptions = options.duration_minutes_options ?? []
     if (durOptions.length) {
       setDurationMinutes((prev) => (durOptions.includes(prev) ? prev : options.duration_minutes))
     }
   }, [options])
+
+  // v2.3: target role 切到非 custom 时清空 custom_target_role
+  useEffect(() => {
+    if (targetRole !== '__custom__') {
+      setCustomTargetRole('')
+    }
+  }, [targetRole])
 
   // 监听 i18n 语言变化
   const [, setLangTick] = useState(0)
@@ -123,13 +131,13 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
     return options.focus_topics_recommended.map((item) => item.value).slice(0, maxFocusTopics)
   }, [options?.focus_topics_recommended, maxFocusTopics])
 
-  // 初次加载 options 后，默认勾选前 N 个
+  // 初次加载 options 后，不默认勾选任何 topic；用户按需勾选
+  // 系统自身已按大厂面试逻辑组织全部 topic，只有用户希望针对性提升某方面时才勾选
   const initializedRef = useRef(false)
   useEffect(() => {
-    if (initializedRef.current || recommendedFocusTopics.length === 0) return
+    if (initializedRef.current) return
     initializedRef.current = true
-    setSelectedFocusTopics(recommendedFocusTopics.slice(0, Math.min(4, maxFocusTopics)))
-  }, [recommendedFocusTopics, maxFocusTopics])
+  }, [])
 
   function toggleFocusTopic(topic: string) {
     setSelectedFocusTopics((current) => {
@@ -186,9 +194,9 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
 
   return (
     <>
-      <header className="v2-page-header">
+      <header className="app-page-header">
         <div>
-          <div className="v2-title-row">
+          <div className="app-title-row">
             <h2>{t('config_title')}</h2>
           </div>
           <p>{t('config_subtitle')}</p>
@@ -196,11 +204,11 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
         <InterviewHeaderArt />
       </header>
 
-      <section className="v2-config-layout">
-        <Card className="v2-panel v2-config-form">
-          <fieldset className="v2-config-form-fieldset" disabled={formDisabled}>
-            <div className="v2-section-heading">
-              <span className="v2-section-icon">
+      <section className="app-config-layout">
+        <Card className="app-panel app-config-form">
+          <fieldset className="app-config-form-fieldset" disabled={formDisabled}>
+            <div className="app-section-heading">
+              <span className="app-section-icon">
                 <SlidersHorizontal />
               </span>
               <div>
@@ -209,12 +217,12 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
               </div>
             </div>
 
-            {optionsError ? <p className="v2-error">{optionsError}</p> : null}
-            <div className="v2-field-grid">
-              <div className="v2-config-field">
+            {optionsError ? <p className="app-error">{optionsError}</p> : null}
+            <div className="app-field-grid">
+              <div className="app-config-field">
                 <Label>{t('section_resume')}</Label>
                 <Select value={resumeId} onValueChange={setResumeId} disabled={formDisabled}>
-                  <SelectTrigger className="v2-resume-select">
+                  <SelectTrigger className="app-resume-select">
                     <SelectValue placeholder="—" />
                   </SelectTrigger>
                   <SelectContent>
@@ -242,7 +250,7 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
                 onChange={setTargetRole}
               />
               {targetRole === CUSTOM_ROLE_TOKEN ? (
-                <div className="v2-config-field">
+                <div className="app-config-field">
                   <Label htmlFor="custom-role">{t('label_custom_role')}</Label>
                   <Input
                     id="custom-role"
@@ -264,25 +272,25 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
               <SegmentedControl
                 label={t('label_interview_language')}
                 options={[
-                  { value: 'en', label: 'English' },
-                  { value: 'zh', label: '中文' },
+                  { value: 'en', label: t('interview_language_option_en') },
+                  { value: 'zh', label: t('interview_language_option_zh') },
                 ]}
                 value={interviewLanguage}
                 disabled={formDisabled}
                 onChange={(value) => setInterviewLanguage(value as 'en' | 'zh')}
               />
-              <p className="v2-config-hint">{t('interview_language_hint')}</p>
+              <p className="app-config-hint">{t('interview_language_hint')}</p>
             </div>
 
-            <div className="v2-row-2col">
-              <div className="v2-config-field">
+            <div className="app-row-2col">
+              <div className="app-config-field">
                 <Label htmlFor="duration">{t('label_duration')}</Label>
                 <Select
                   value={String(durationMinutes)}
                   onValueChange={(v) => setDurationMinutes(Number(v))}
                   disabled={formDisabled}
                 >
-                  <SelectTrigger id="duration" className="v2-resume-select">
+                  <SelectTrigger id="duration" className="app-resume-select">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -294,9 +302,9 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
                   </SelectContent>
                 </Select>
               </div>
-              <div className="v2-config-field v2-algorithm-toggle">
+              <div className="app-config-field app-algorithm-toggle">
                 <Label>{t('label_algorithm')}</Label>
-                <label className="v2-toggle">
+                <label className="app-toggle">
                   <input
                     type="checkbox"
                     checked={includeAlgorithm}
@@ -305,12 +313,12 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
                   />
                   <span>{includeAlgorithm ? t('algo_on') : t('algo_off')}</span>
                 </label>
-                <p className="v2-config-hint">{t('algo_hint')}</p>
+                <p className="app-config-hint">{t('algo_hint')}</p>
               </div>
             </div>
 
-            <div className="v2-jd-panel">
-              <div className="v2-jd-header">
+            <div className="app-jd-panel">
+              <div className="app-jd-header">
                 <div>
                   <h3>JD</h3>
                   <p>—</p>
@@ -318,7 +326,7 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
                 <Badge variant="secondary">{jdText.trim() ? 'JD YES' : 'JD NO'}</Badge>
               </div>
               <textarea
-                className="v2-jd-textarea"
+                className="app-jd-textarea"
                 value={jdText}
                 maxLength={8000}
                 disabled={formDisabled}
@@ -327,12 +335,12 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
               />
             </div>
 
-            <div className="v2-focus-panel">
-              <div className="v2-focus-header">
+            <div className="app-focus-panel">
+              <div className="app-focus-header">
                 <span>{t('section_focus')}</span>
                 <Badge variant="secondary">{selectedFocusTopics.length}/{maxFocusTopics}</Badge>
               </div>
-              <div className="v2-focus-options">
+              <div className="app-focus-options">
                 {recommendedFocusTopics.map((topic) => (
                   <button
                     key={topic}
@@ -350,7 +358,7 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
                     <button
                       key={topic}
                       type="button"
-                      className="active v2-focus-custom-chip"
+                      className="active app-focus-custom-chip"
                       disabled={formDisabled}
                       onClick={() => toggleFocusTopic(topic)}
                       title={t('focus_custom_chip_hint')}
@@ -361,10 +369,10 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
               </div>
             </div>
 
-            <div className="v2-advanced-panel">
+            <div className="app-advanced-panel">
               <button
                 type="button"
-                className="v2-advanced-toggle"
+                className="app-advanced-toggle"
                 onClick={() => setAdvancedOpen((v) => !v)}
                 aria-expanded={advancedOpen}
               >
@@ -372,9 +380,9 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
                 {t('advanced_toggle')}
               </button>
               {advancedOpen ? (
-                <div className="v2-advanced-body">
+                <div className="app-advanced-body">
                   <Label htmlFor="custom-focus">{t('label_custom_focus')}</Label>
-                  <div className="v2-custom-focus-row">
+                  <div className="app-custom-focus-row">
                     <Input
                       id="custom-focus"
                       value={customFocusInput}
@@ -402,14 +410,14 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
                       {t('btn_add')}
                     </Button>
                   </div>
-                  <p className="v2-config-hint">{t('custom_focus_hint')}</p>
+                  <p className="app-config-hint">{t('custom_focus_hint')}</p>
                 </div>
               ) : null}
             </div>
 
-            {submitError ? <p className="v2-error">{submitError}</p> : null}
+            {submitError ? <p className="app-error">{submitError}</p> : null}
             <Button
-              className="v2-primary-action"
+              className="app-primary-action"
               type="button"
               disabled={
                 formDisabled ||
@@ -423,7 +431,7 @@ export function InterviewConfigurationPage({ token, resumes, selectedResume }: I
               {isSubmitting ? t('btn_generating') : t('btn_generate')}
             </Button>
             {includeAlgorithm ? (
-              <p className="v2-algo-note">
+              <p className="app-algo-note">
                 <Code2 size={14} aria-hidden="true" /> {t('algo_panel_note')}
               </p>
             ) : null}
@@ -446,9 +454,9 @@ interface SegmentedControlProps {
 
 function SegmentedControl({ label, options, value, disabled = false, onChange }: SegmentedControlProps) {
   return (
-    <div className="v2-segment-field">
+    <div className="app-segment-field">
       <span>{label}</span>
-      <div className="v2-segment-group">
+      <div className="app-segment-group">
         {options.map((option) => (
           <button
             key={option.value}

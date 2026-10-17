@@ -18,5 +18,18 @@
   "resume_summary": "摘要",
   "skills": "技能",
   "experience": "经验",
-  "education": "教育背景"
+  "education": "教育背景",
+  "preview_personal_summary": "个人摘要",
+  "preview_highlights": "亮点标签",
+  "preview_skills": "技术技能",
+  "preview_work": "工作经历",
+  "preview_projects": "项目经历",
+  "preview_raw_text": "查看抽取原文",
+  "preview_model_label": "解析模型",
+  "preview_model_default": "默认模型",
+  "preview_model_unrecorded": "未记录",
+  "preview_updated_at": "更新时间",
+  "preview_empty_text": "暂无",
+  "preview_no_detail": "暂无详情",
+  "preview_fallback_name": "经历 {{n}}"
 }

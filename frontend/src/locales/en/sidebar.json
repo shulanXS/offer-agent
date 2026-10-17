@@ -1,7 +1,8 @@
 {
-  "brand": "AI Interviewer",
-  "tagline": "Professional mock interview workspace",
+  "brand": "Rally AI",
+  "tagline": "AI-powered mock interviews",
   "quota_label": "Quota left: {{count}}",
+  "unlimited": "Unlimited",
   "tier_label": "Pro",
   "tier_free": "Free",
   "tier_paid": "Paid",
@@ -11,5 +12,7 @@
   "nav_create": "Create Interview",
   "nav_records": "Interview History",
   "logout": "Sign out",
-  "language": "Language"
+  "language": "Language",
+  "nav_login_short": "Sign in",
+  "nav_register_short": "Sign up"
 }

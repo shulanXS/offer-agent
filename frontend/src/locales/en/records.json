@@ -24,5 +24,11 @@
   "page_meta": "Page {{current}} / {{total}}",
   "total_count": "{{count}} records in total",
   "btn_prev": "Previous",
-  "btn_next": "Next"
+  "btn_next": "Next",
+  "placeholder_feature_1": "All interviews in reverse-chronological order with filters by role, level, status",
+  "placeholder_feature_2": "Review past reports and track competency score changes",
+  "placeholder_feature_3": "Jump back to the plan or evaluation page in one click",
+  "score_label_short": "Score",
+  "score_empty": "No score yet",
+  "score_aria_full": "Overall score {{score}}, out of 100"
 }

@@ -32,6 +32,7 @@ export function RegeneratePlanDialog({
 }: RegeneratePlanDialogProps) {
   const { t } = useTranslation('plans')
   const { t: tc } = useTranslation('common')
+  const { t: ti } = useTranslation('interview')
   const hasJd = Boolean(configuration.jd_text?.trim())
   const strategyOptions = useMemo(
     () => REGENERATION_STRATEGIES.filter((item) => !('requiresJd' in item && item.requiresJd) || hasJd),
@@ -81,8 +82,8 @@ export function RegeneratePlanDialog({
 
   const remainingHint =
     regenerationsRemaining <= 1
-      ? 'Last attempt: after this you cannot adjust further.'
-      : `After this, you can adjust ${regenerationsRemaining - 1} more time(s). (Remaining: ${regenerationsRemaining})`
+      ? t('regenerate_last_attempt')
+      : t('regenerate_remaining_hint', { remaining: regenerationsRemaining, count: regenerationsRemaining - 1 })
 
   function handleConfirm() {
     onConfirm({
@@ -94,13 +95,13 @@ export function RegeneratePlanDialog({
   return createPortal(
     <div className="confirm-dialog-root" role="presentation">
       <button type="button" className="confirm-dialog-backdrop" aria-label={tc('close')} disabled={loading} onClick={onCancel} />
-      <div className="v2-regenerate-dialog" role="dialog" aria-modal="true" aria-labelledby="regenerate-dialog-title">
+      <div className="app-regenerate-dialog" role="dialog" aria-modal="true" aria-labelledby="regenerate-dialog-title">
         <h3 id="regenerate-dialog-title">{t('regenerate_title')}</h3>
-        <p className="v2-regenerate-remaining-hint">{remainingHint}</p>
+        <p className="app-regenerate-remaining-hint">{remainingHint}</p>
 
-        <div className="v2-regenerate-section">
+        <div className="app-regenerate-section">
           <Label>{t('regenerate_strategy')}</Label>
-          <div className="v2-regenerate-strategies">
+          <div className="app-regenerate-strategies">
             {strategyOptions.map((option) => (
               <button
                 key={option.value}
@@ -109,18 +110,18 @@ export function RegeneratePlanDialog({
                 disabled={loading}
                 onClick={() => setStrategy(option.value)}
               >
-                {option.label}
+                {ti(option.i18nKey)}
               </button>
             ))}
           </div>
         </div>
 
         {strategy === 'different_plan' ? (
-          <div className="v2-regenerate-section">
+          <div className="app-regenerate-section">
             <Label htmlFor="regenerate-instruction">{t('regenerate_additional_label')}</Label>
             <textarea
               id="regenerate-instruction"
-              className="v2-jd-textarea"
+              className="app-jd-textarea"
               maxLength={200}
               value={additionalInstruction}
               disabled={loading}

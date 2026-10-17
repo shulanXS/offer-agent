@@ -23,19 +23,21 @@ class AuthService:
         username = _normalize_username(username)
         existing_user = self.store.get_user_by_username(username)
         if existing_user:
-            raise_app_error(409, ErrorCode.USERNAME_EXISTS, "用户名已存在")
+            raise_app_error(409, ErrorCode.USERNAME_EXISTS, "Username already exists")
         user = self.store.create_user(
             username=username,
             password_hash=hash_password(password),
             quota_remaining=settings.new_user_free_quota,
         )
+        # v2.3：新建用户即同步
+        user = self.store.sync_subscription_status(int(user["id"])) or user
         return self._build_auth_response(user)
 
     def login(self, username: str, password: str) -> dict:
         username = _normalize_username(username)
         user = self.store.get_user_by_username(username)
         if not user or not verify_password(password, user["password_hash"]):
-            raise_app_error(401, ErrorCode.INVALID_CREDENTIALS, "用户名或密码错误")
+            raise_app_error(401, ErrorCode.INVALID_CREDENTIALS, "Invalid username or password")
         # C2：老 hash 惰性升级（不阻塞主流程）
         if needs_rehash(user["password_hash"]):
             try:
@@ -46,10 +48,13 @@ class AuthService:
                 logging.getLogger("uvicorn.error").exception(
                     "password rehash failed: user_id=%s", user["id"]
                 )
+        # v2.3：登录即同步过期订阅
+        user = self.store.sync_subscription_status(int(user["id"])) or user
         return self._build_auth_response(user)
 
     def get_public_user(self, user_id: int) -> dict:
-        user = self.store.get_user_by_id(user_id)
+        # v2.3：先同步订阅状态，再序列化
+        user = self.store.get_user_with_synced_membership(user_id)
         if not user:
             raise_app_error(404, ErrorCode.USER_NOT_FOUND, "用户不存在")
         return self._serialize_user(user)
@@ -60,12 +65,14 @@ class AuthService:
             "user": self._serialize_user(user),
         }
 
-    @staticmethod
-    def _serialize_user(user: dict) -> dict:
+    def _serialize_user(self, user: dict) -> dict:
+        # v2.3：quota_remaining=None 表示订阅有效（=无限）
+        effective = self.store.effective_quota_remaining(user)
         return {
             "id": user["id"],
             "username": user["username"],
-            "quota_remaining": user["quota_remaining"],
+            "quota_remaining": effective,
             "tier": user.get("tier", "free"),
+            "membership_status": user.get("membership_status", "free"),
             "subscription_expires_at": user.get("subscription_expires_at"),
         }

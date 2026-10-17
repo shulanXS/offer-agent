@@ -1,72 +1,78 @@
 // D3：JD 要点验证
 import { Card } from '@/components/ui/card'
 import { BriefcaseBusiness } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { EvaluationJdMatch } from '@/types/interviewEvaluation'
 import { buildJdMatchListItems, jdStatusLabel } from './utils'
 
 export function JdMatchSection({ jdMatch }: { jdMatch: EvaluationJdMatch }) {
+  const { t } = useTranslation('evaluation')
   const items = buildJdMatchListItems(jdMatch)
   const alignedCount = jdMatch.verified_aligned.length
   const riskCount = jdMatch.verified_with_risk.length
   const unverifiedCount = jdMatch.unverified.length
 
   return (
-    <section className="v2-eval-section-wrap v2-eval-jd">
-      <Card className="v2-panel v2-eval-jd-panel">
-        <div className="v2-eval-jd-panel-head">
+    <section className="app-eval-section-wrap app-eval-jd">
+      <Card className="app-panel app-eval-jd-panel">
+        <div className="app-eval-jd-panel-head">
           <h3>
             <BriefcaseBusiness size={18} />
-            本场 JD 要点验证
+            {t('jd_match_section_title')}
           </h3>
           <p>{jdMatch.summary}</p>
           {items.length ? (
-            <div className="v2-eval-jd-stats">
+            <div className="app-eval-jd-stats">
               {alignedCount ? (
-                <span className="v2-eval-jd-stat v2-eval-jd-stat-aligned">已验证 {alignedCount}</span>
+                <span className="app-eval-jd-stat app-eval-jd-stat-aligned">
+                  {t('jd_match_stat_aligned', { count: alignedCount })}
+                </span>
               ) : null}
               {riskCount ? (
-                <span className="v2-eval-jd-stat v2-eval-jd-stat-risk">有风险 {riskCount}</span>
+                <span className="app-eval-jd-stat app-eval-jd-stat-risk">
+                  {t('jd_match_stat_risk', { count: riskCount })}
+                </span>
               ) : null}
               {unverifiedCount ? (
-                <span className="v2-eval-jd-stat v2-eval-jd-stat-unverified">
-                  尚未验证 {unverifiedCount}
+                <span className="app-eval-jd-stat app-eval-jd-stat-unverified">
+                  {t('jd_match_stat_unverified', { count: unverifiedCount })}
                 </span>
               ) : null}
             </div>
           ) : null}
           {items.length ? (
-            <p className="v2-eval-jd-disclaimer">
-              下列为本场计划对齐的 JD 要点。尚未验证表示本场未充分讨论或证据不足，不代表不符合岗位要求。
-            </p>
+            <p className="app-eval-jd-disclaimer">{t('jd_match_disclaimer')}</p>
           ) : null}
         </div>
 
-        <div className="v2-eval-jd-body">
+        <div className="app-eval-jd-body">
           {items.length ? (
-            <ul className="v2-eval-jd-checklist">
+            <ul className="app-eval-jd-checklist">
               {items.map((item) => (
                 <li
                   key={item.key}
-                  className={`v2-eval-jd-checklist-item v2-eval-jd-checklist-item-${item.status}`}
+                  className={`app-eval-jd-checklist-item app-eval-jd-checklist-item-${item.status}`}
                 >
-                  <div className="v2-eval-jd-checklist-row">
+                  <div className="app-eval-jd-checklist-row">
                     <strong>{item.requirement}</strong>
-                    <span className={`v2-eval-jd-status-badge v2-eval-jd-status-badge-${item.status}`}>
-                      {jdStatusLabel(item.status)}
+                    <span className={`app-eval-jd-status-badge app-eval-jd-status-badge-${item.status}`}>
+                      {jdStatusLabel(item.status, t)}
                     </span>
                   </div>
                   {item.topic_name ? (
-                    <span className="v2-eval-jd-topic">关联主题：{item.topic_name}</span>
+                    <span className="app-eval-jd-topic">
+                      {t('jd_match_topic_label')}：{item.topic_name}
+                    </span>
                   ) : null}
-                  {item.note ? <span className="v2-eval-jd-note">{item.note}</span> : null}
+                  {item.note ? <span className="app-eval-jd-note">{item.note}</span> : null}
                   {item.evidence_quotes?.length ? (
-                    <blockquote className="v2-eval-jd-quote">{item.evidence_quotes[0]}</blockquote>
+                    <blockquote className="app-eval-jd-quote">{item.evidence_quotes[0]}</blockquote>
                   ) : null}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="v2-eval-empty-copy v2-eval-jd-empty-copy">{jdMatch.summary}</p>
+            <p className="app-eval-empty-copy app-eval-jd-empty-copy">{jdMatch.summary}</p>
           )}
         </div>
       </Card>

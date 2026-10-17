@@ -1,49 +1,96 @@
+/**
+ * v2.4 登录/注册对话框
+ *
+ * v3.6 改动：
+ * - 字段下显示 hint（格式说明）
+ * - 提交前本地校验（用户名 3+、密码 6+），避免无意义 422
+ * - 切 tab / 改输入时清错
+ * - 错误显示在对话框顶部（醒目），不挤在按钮上面
+ */
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { ReactNode } from 'react'
 
 export type AuthMode = 'login' | 'register'
 
-interface AuthPageProps {
+interface AuthDialogProps {
+  open: boolean
   authMode: AuthMode
   error: string
   isSubmitting: boolean
   notice: string
   password: string
   username: string
-  leadingSlot?: ReactNode
+  /** v3.7：未登录整页态下隐藏关闭按钮 / 禁用遮罩点击关闭 */
+  hideClose?: boolean
+  onClose: () => void
   onAuthModeChange: (mode: AuthMode) => void
   onPasswordChange: (value: string) => void
   onSubmit: () => Promise<void>
   onUsernameChange: (value: string) => void
 }
 
-export function AuthPage({
+export function AuthDialog({
+  open,
   authMode,
   error,
   isSubmitting,
   notice,
   password,
   username,
-  leadingSlot,
+  hideClose = false,
+  onClose,
   onAuthModeChange,
   onPasswordChange,
   onSubmit,
   onUsernameChange,
-}: AuthPageProps) {
+}: AuthDialogProps) {
   const { t } = useTranslation('auth')
   const { t: tc } = useTranslation('common')
+
+  if (!open) return null
+
+  // v3.6：本地字段校验
+  const trimmedUsername = username.trim()
+  const usernameError =
+    authMode === 'register' && trimmedUsername.length > 0 && trimmedUsername.length < 3
+      ? t('error_username_short')
+      : ''
+  const passwordError =
+    password.length > 0 && password.length < 6 ? t('error_password_short') : ''
+  const canSubmit =
+    !isSubmitting && trimmedUsername.length >= 3 && password.length >= 6
+
   return (
-    <main className="v2-shell v2-auth-shell">
-      {leadingSlot ? <div className="v2-auth-leading">{leadingSlot}</div> : null}
-      <Card className="v2-auth-card">
-        <span className="v2-kicker">{t('kicker')}</span>
-        <h1>{t('headline')}</h1>
+    <div
+      className="app-auth-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="app-auth-dialog-title"
+      onClick={(event) => {
+        // v3.7：hideClose 时禁用遮罩关闭
+        if (hideClose) return
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <Card className="app-auth-dialog">
+        {hideClose ? null : (
+          <button
+            type="button"
+            className="app-auth-dialog-close"
+            aria-label={tc('close')}
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        )}
+        <span className="app-kicker">Rally</span>
+        <h2 id="app-auth-dialog-title">{t('headline')}</h2>
         <p>{t('subhead')}</p>
-        <div className="v2-auth-tabs">
+        <div className="app-auth-tabs">
           <Button
             variant={authMode === 'login' ? 'default' : 'outline'}
             onClick={() => onAuthModeChange('login')}
@@ -57,8 +104,18 @@ export function AuthPage({
             {t('tab_register')}
           </Button>
         </div>
+        {error ? (
+          <div className="app-alert app-alert-error" role="alert">
+            {error}
+          </div>
+        ) : null}
+        {notice ? (
+          <div className="app-alert app-alert-notice" role="status">
+            {notice}
+          </div>
+        ) : null}
         <form
-          className="v2-auth-form"
+          className="app-auth-form"
           onSubmit={(event) => {
             event.preventDefault()
             void onSubmit()
@@ -66,7 +123,18 @@ export function AuthPage({
         >
           <Label>
             {t('label_username')}
-            <Input value={username} onChange={(event) => onUsernameChange(event.target.value)} required />
+            <Input
+              value={username}
+              onChange={(event) => onUsernameChange(event.target.value)}
+              placeholder={t('label_username_placeholder')}
+              autoComplete="username"
+              required
+              aria-invalid={Boolean(usernameError)}
+            />
+            {authMode === 'register' ? (
+              <span className="app-auth-hint">{t('hint_username')}</span>
+            ) : null}
+            {usernameError ? <span className="app-field-error">{usernameError}</span> : null}
           </Label>
           <Label>
             {t('label_password')}
@@ -74,26 +142,31 @@ export function AuthPage({
               type="password"
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder={t('label_password_placeholder')}
+              autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
               required
+              aria-invalid={Boolean(passwordError)}
             />
+            {authMode === 'register' ? (
+              <span className="app-auth-hint">{t('hint_password')}</span>
+            ) : null}
+            {passwordError ? <span className="app-field-error">{passwordError}</span> : null}
           </Label>
-          {notice ? <p className="v2-notice">{notice}</p> : null}
-          {error ? <p className="v2-error">{error}</p> : null}
-          <Button type="submit" disabled={isSubmitting || !username.trim() || !password}>
+          <Button type="submit" disabled={!canSubmit}>
             {isSubmitting ? tc('submitting') : authMode === 'login' ? t('submit_login') : t('submit_register')}
           </Button>
         </form>
       </Card>
-    </main>
+    </div>
   )
 }
 
 export function AuthLoading() {
   const { t } = useTranslation('common')
   return (
-    <main className="v2-shell v2-auth-shell">
-      <Card className="v2-auth-card">
-        <span className="v2-kicker">AI</span>
+    <main className="app-shell app-auth-shell">
+      <Card className="app-auth-card">
+        <span className="app-kicker">Rally</span>
         <p>{t('loading')}</p>
       </Card>
     </main>

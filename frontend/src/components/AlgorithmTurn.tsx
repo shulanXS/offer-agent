@@ -62,8 +62,8 @@ export function AlgorithmTurn({ token, problemId, onResult, disabled = false }: 
 
   if (state === 'loading_problem') {
     return (
-      <Card className="v2-algo-turn">
-        <div className="v2-algo-loading">
+      <Card className="app-algo-turn">
+        <div className="app-algo-loading">
           <Loader2 className="animate-spin" /> {t('algo_loading')}
         </div>
       </Card>
@@ -72,7 +72,7 @@ export function AlgorithmTurn({ token, problemId, onResult, disabled = false }: 
 
   if (state === 'error' && !problem) {
     return (
-      <Card className="v2-algo-turn v2-algo-turn-error">
+      <Card className="app-algo-turn app-algo-turn-error">
         <p>{error}</p>
       </Card>
     )
@@ -81,35 +81,35 @@ export function AlgorithmTurn({ token, problemId, onResult, disabled = false }: 
   if (!problem) return null
 
   return (
-    <Card className="v2-algo-turn">
-      <header className="v2-algo-head">
-        <span className="v2-algo-icon" aria-hidden="true">
+    <Card className="app-algo-turn">
+      <header className="app-algo-head">
+        <span className="app-algo-icon" aria-hidden="true">
           <Code2 size={18} />
         </span>
         <h3>
-          {t('algo_title')} · <span className="v2-algo-diff">{problem.difficulty}</span>
+          {t('algo_title')} · <span className="app-algo-diff">{problem.difficulty}</span>
         </h3>
-        <div className="v2-algo-tags">
+        <div className="app-algo-tags">
           {problem.tags.map((tag) => (
-            <span key={tag} className="v2-algo-tag">
+            <span key={tag} className="app-algo-tag">
               {tag}
             </span>
           ))}
         </div>
       </header>
-      <pre className="v2-algo-prompt">{problem.prompt}</pre>
-      <details className="v2-algo-signature">
+      <pre className="app-algo-prompt">{problem.prompt}</pre>
+      <details className="app-algo-signature">
         <summary>{t('algo_signature')}</summary>
         <pre>{problem.function_signature}</pre>
       </details>
       <textarea
-        className="v2-algo-code"
+        className="app-algo-code"
         value={code}
         disabled={disabled || state === 'judging' || state === 'done'}
         onChange={(e) => setCode(e.target.value)}
         spellCheck={false}
       />
-      <div className="v2-algo-actions">
+      <div className="app-algo-actions">
         <Button
           type="button"
           onClick={() => void handleSubmit()}
@@ -142,19 +142,19 @@ export function AlgorithmTurn({ token, problemId, onResult, disabled = false }: 
         ) : null}
       </div>
       {result ? (
-        <div className="v2-algo-result" data-testid="algo-result">
+        <div className="app-algo-result" data-testid="algo-result">
           <strong>{t('algo_result_overall', { score: result.overall.toFixed(1) })}</strong>
           {result.feedback ? <p>{result.feedback}</p> : null}
-          <div className="v2-algo-scores">
+          <div className="app-algo-scores">
             {Object.entries(result.scores).map(([k, v]) => (
-              <span key={k} className="v2-algo-score-chip">
+              <span key={k} className="app-algo-score-chip">
                 {k}: {Number(v).toFixed(1)}
               </span>
             ))}
           </div>
         </div>
       ) : null}
-      {error ? <p className="v2-error">{error}</p> : null}
+      {error ? <p className="app-error">{error}</p> : null}
     </Card>
   )
 }

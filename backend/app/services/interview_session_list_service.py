@@ -120,7 +120,7 @@ class InterviewSessionListService:
             if remaining_seconds is not None and remaining_seconds <= 0:
                 return "pending_evaluation", "生成评估报告", f"{base}/evaluation"
             return "in_progress", "继续面试", f"{base}/live"
-        if status in {"planning", "plan_ready"}:
+        if status in {"planning", "plan_ready", "plan_confirmed"}:
             return "not_started", "开始面试", f"{base}/plan"
         return "not_started", "开始面试", f"{base}/live"
 

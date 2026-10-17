@@ -2,6 +2,7 @@
 import { Card } from '@/components/ui/card'
 import { Layers3, Play } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { EvaluationCompetency, EvaluationCompetencyStatus } from '@/types/interviewEvaluation'
 import { resolveCompetencyStatusLabel, resolveCompetencyVisualTone } from '@/utils/evaluationScorePresentation'
 import { DIMENSION_TAB_ICONS, buildEvidenceRounds } from './utils'
@@ -13,6 +14,7 @@ export function DimensionSection({
   competencies: EvaluationCompetency[]
   onReview: () => void
 }) {
+  const { t } = useTranslation('evaluation')
   const [selectedTopicId, setSelectedTopicId] = useState(competencies[0]?.topic_id ?? '')
   const selectedCompetency =
     competencies.find((item) => item.topic_id === selectedTopicId) ?? competencies[0]
@@ -20,36 +22,36 @@ export function DimensionSection({
   if (!selectedCompetency) return null
 
   return (
-    <section className="v2-eval-section-wrap v2-eval-dimensions">
-      <Card className="v2-panel v2-eval-dimensions-panel">
-        <div className="v2-eval-dimensions-panel-head">
+    <section className="app-eval-section-wrap app-eval-dimensions">
+      <Card className="app-panel app-eval-dimensions-panel">
+        <div className="app-eval-dimensions-panel-head">
           <h3>
             <Layers3 size={18} />
-            各维度评价
+            {t('dimension_title_section')}
           </h3>
-          <p>各维度以状态和文字点评为主；上方综合分是本页唯一的数值参考。讨论不足的维度未计入综合分。</p>
+          <p>{t('dimension_section_subtitle')}</p>
         </div>
 
-        <div className="v2-eval-dimensions-body">
-          <div className="v2-eval-dimension-workspace">
-            <div className="v2-eval-dimension-tabs" role="tablist" aria-label="各维度评价">
+        <div className="app-eval-dimensions-body">
+          <div className="app-eval-dimension-workspace">
+            <div className="app-eval-dimension-tabs" role="tablist" aria-label={t('dimension_title_section')}>
               {competencies.map((competency, index) => {
                 const Icon = DIMENSION_TAB_ICONS[index % DIMENSION_TAB_ICONS.length]
                 const active = competency.topic_id === selectedCompetency.topic_id
                 const visualTone = resolveCompetencyVisualTone(competency.status, competency.score)
-                const statusLabel = resolveCompetencyStatusLabel(competency.status, competency.score)
+                const statusLabel = resolveCompetencyStatusLabel(competency.status, competency.score, t)
                 return (
                   <button
                     key={competency.topic_id}
                     type="button"
                     role="tab"
                     aria-selected={active}
-                    className={`v2-eval-dimension-tab${active ? ' active' : ''}`}
+                    className={`app-eval-dimension-tab${active ? ' active' : ''}`}
                     onClick={() => setSelectedTopicId(competency.topic_id)}
                   >
                     <Icon size={16} />
-                    <span className="v2-eval-dimension-tab-name">{competency.name}</span>
-                    <span className={`v2-eval-dimension-tab-status v2-eval-dimension-tab-status-${visualTone}`}>
+                    <span className="app-eval-dimension-tab-name">{competency.name}</span>
+                    <span className={`app-eval-dimension-tab-status app-eval-dimension-tab-status-${visualTone}`}>
                       <StatusDot status={competency.status} score={competency.score} />
                       {statusLabel}
                     </span>
@@ -73,41 +75,42 @@ function DimensionDetailPanel({
   competency: EvaluationCompetency
   onReview: () => void
 }) {
+  const { t } = useTranslation('evaluation')
   const evidenceRounds = buildEvidenceRounds(competency)
   const visualTone = resolveCompetencyVisualTone(competency.status, competency.score)
   const comment = competency.evaluation_comment?.trim()
 
   return (
-    <div className="v2-eval-dimension-detail" role="tabpanel" aria-label={`${competency.name}评价详情`}>
-      <div className={`v2-eval-dimension-comment-block v2-eval-dimension-comment-block-${visualTone}`}>
-        <h4>维度评价</h4>
-        <p>{comment || '暂无维度评价。'}</p>
+    <div className="app-eval-dimension-detail" role="tabpanel" aria-label={t('dimension_detail_aria', { name: competency.name })}>
+      <div className={`app-eval-dimension-comment-block app-eval-dimension-comment-block-${visualTone}`}>
+        <h4>{t('dimension_comment_title')}</h4>
+        <p>{comment || t('dimension_no_comment')}</p>
       </div>
 
       {evidenceRounds.length ? (
-        <div className="v2-eval-evidence-section">
-          <div className="v2-eval-evidence-section-head">
-            <h4>回答依据</h4>
-            <p className="v2-eval-evidence-section-note">按对话先后顺序展示该主题下的全部问答。</p>
+        <div className="app-eval-evidence-section">
+          <div className="app-eval-evidence-section-head">
+            <h4>{t('evidence_section_title')}</h4>
+            <p className="app-eval-evidence-section-note">{t('evidence_section_note')}</p>
           </div>
-          <ul className="v2-eval-evidence-rounds">
+          <ul className="app-eval-evidence-rounds">
             {evidenceRounds.map((round) => (
-              <li key={round.key} className="v2-eval-evidence-round">
-                <div className="v2-eval-evidence-round-head">
-                  <span className="v2-eval-evidence-round-index">第 {round.index} 轮</span>
-                  <button type="button" className="v2-eval-evidence-play" onClick={onReview}>
+              <li key={round.key} className="app-eval-evidence-round">
+                <div className="app-eval-evidence-round-head">
+                  <span className="app-eval-evidence-round-index">{t('evidence_round_label', { n: round.index })}</span>
+                  <button type="button" className="app-eval-evidence-play" onClick={onReview}>
                     <Play size={14} />
-                    回放片段
+                    {t('evidence_replay_btn')}
                   </button>
                 </div>
                 {round.question ? (
-                  <div className="v2-eval-evidence-qa-block">
-                    <span className="v2-eval-evidence-qa-label">面试官</span>
+                  <div className="app-eval-evidence-qa-block">
+                    <span className="app-eval-evidence-qa-label">{t('evidence_label_interviewer')}</span>
                     <p>{round.question}</p>
                   </div>
                 ) : null}
-                <div className="v2-eval-evidence-qa-block">
-                  <span className="v2-eval-evidence-qa-label">你的回答</span>
+                <div className="app-eval-evidence-qa-block">
+                  <span className="app-eval-evidence-qa-label">{t('evidence_label_candidate')}</span>
                   <p>{round.answer}</p>
                 </div>
               </li>
@@ -127,5 +130,5 @@ function StatusDot({
   score?: number | null
 }) {
   const tone = resolveCompetencyVisualTone(status, score)
-  return <span className={`v2-eval-status-dot v2-eval-status-dot-${tone}`} aria-hidden />
+  return <span className={`app-eval-status-dot app-eval-status-dot-${tone}`} aria-hidden />
 }

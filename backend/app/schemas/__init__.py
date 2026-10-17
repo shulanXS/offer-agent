@@ -31,8 +31,10 @@ class LoginRequest(BaseModel):
 class UserProfile(BaseModel):
     id: int
     username: str
-    quota_remaining: int
+    # v2.3: 订阅用户为 None (=无限)；其他用户为整数剩余
+    quota_remaining: int | None = None
     tier: str = "free"
+    membership_status: str = "free"
     subscription_expires_at: str | None = None
 
 

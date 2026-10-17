@@ -2,9 +2,9 @@ export type ScoreRingTone = 'high' | 'medium' | 'low'
 
 /** 圆环颜色仅由分数决定，与是否评完所有考察点无关。 */
 export const SCORE_RING_TIER = {
-  high: { min: 80, label: '表现较好' },
-  medium: { min: 60, label: '中等' },
-  low: { min: 0, label: '待加强' },
+  high: { min: 80, i18nKey: 'score_tier_high' },
+  medium: { min: 60, i18nKey: 'score_tier_medium' },
+  low: { min: 0, i18nKey: 'score_tier_low' },
 } as const
 
 export interface ScoreRingPresentation {
@@ -18,23 +18,26 @@ export interface ScoreRingPresentation {
 
 import type { EvaluationCompetencyStatus } from '../types/interviewEvaluation'
 
+type Translator = (key: string, options?: Record<string, unknown>) => string
+
 export function resolveCompetencyStatusLabel(
   status: EvaluationCompetencyStatus,
   score: number | null | undefined,
+  t: Translator = (key) => key,
 ): string {
   if (status === 'verified') {
-    return '表现较好'
+    return t('competency_status_verified')
   }
   if (status === 'unverified') {
-    return '讨论不足'
+    return t('competency_status_unverified')
   }
   if (typeof score === 'number' && score <= 2) {
-    return '明显不足'
+    return t('competency_status_low')
   }
   if (score === 3) {
-    return '仍有明显缺口'
+    return t('competency_status_mid')
   }
-  return '有亮点待加强'
+  return t('competency_status_partial')
 }
 
 export function isLowCompetencyScore(

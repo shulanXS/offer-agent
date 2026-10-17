@@ -19,7 +19,19 @@
   "INTERVIEW_BOOTSTRAP_FAILED": "Failed to start the interview. Please try again.",
   "INTERVIEW_REPLY_FAILED": "The interviewer failed to respond. Please try again.",
   "INTERVIEW_REPLY_IN_PROGRESS": "The previous answer is still being processed, please wait.",
+  "INTERVIEW_REPLY_INVALID": "Reply payload is invalid.",
+  "INTERVIEW_LANGUAGE_INVALID": "Interview language must be en or zh.",
   "INTERVIEW_EVALUATION_FAILED": "Failed to generate the evaluation. Please try again later.",
+  "ALGORITHM_PROBLEM_NOT_FOUND": "Algorithm problem not found.",
+  "JUDGE_CODE_INVALID": "Submitted code is empty.",
+  "JUDGE_LANGUAGE_UNSUPPORTED": "This programming language is not supported by the judge.",
+  "JUDGE_EXECUTION_FAILED": "The judge failed to execute. Please retry later.",
+  "PAYMENT_FAILED": "Payment failed. Please try again or contact support.",
   "INTERNAL_ERROR": "Internal server error, please try again later.",
-  "rate_limited": "Too many requests, please slow down."
+  "rate_limited": "Too many requests, please slow down.",
+  "field_string_too_short": "too short",
+  "field_string_too_long": "too long",
+  "field_value_error": "invalid format",
+  "field_missing": "required",
+  "field_": "invalid"
 }

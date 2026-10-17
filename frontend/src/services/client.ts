@@ -21,6 +21,25 @@ type UnauthorizedHandler = () => void
 
 let unauthorizedHandler: UnauthorizedHandler | null = null
 
+/** API 错误对象：携带 i18n_key + status + payload，便于前端按 code 翻错误。 */
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string
+  readonly i18nKey: string | null
+  readonly details: unknown
+  readonly traceId: string | null
+
+  constructor(message: string, status: number, payload: ApiErrorPayload | null) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = payload?.code ?? ''
+    this.i18nKey = payload?.i18n_key ?? null
+    this.details = payload?.details ?? payload?.detail ?? null
+    this.traceId = payload?.trace_id ?? null
+  }
+}
+
 /** 由 App 注册：401 时清 token 并跳登录。 */
 export function registerUnauthorizedHandler(handler: UnauthorizedHandler): void {
   unauthorizedHandler = handler
@@ -83,18 +102,18 @@ export async function requestJson<T>(
       // C4：401 自动清 token
       handleUnauthorized()
       const payload = await safeJson(response)
-      throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:unauthorized'))
+      throw new ApiError(readApiErrorMessage(payload) ?? i18n.t('common:unauthorized'), response.status, payload)
     }
 
     if (!response.ok) {
       const payload = await safeJson(response)
-      throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:request_failed'))
+      throw new ApiError(readApiErrorMessage(payload) ?? i18n.t('common:request_failed'), response.status, payload)
     }
 
     return (await response.json()) as T
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error(i18n.t('common:request_timeout'))
+      throw new ApiError(i18n.t('common:request_timeout'), 0, null)
     }
     throw error
   } finally {
@@ -114,12 +133,12 @@ export async function requestFormData<T>(path: string, formData: FormData, token
   if (response.status === 401) {
     handleUnauthorized()
     const payload = await safeJson(response)
-    throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:unauthorized'))
+    throw new ApiError(readApiErrorMessage(payload) ?? i18n.t('common:unauthorized'), response.status, payload)
   }
 
   if (!response.ok) {
     const payload = await safeJson(response)
-    throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:request_failed'))
+    throw new ApiError(readApiErrorMessage(payload) ?? i18n.t('common:request_failed'), response.status, payload)
   }
 
   return (await response.json()) as T
@@ -131,7 +150,7 @@ export async function consumeEventStream(response: Response, onEvent: (event: St
       handleUnauthorized()
     }
     const payload = await safeJson(response)
-    throw new Error(readApiErrorMessage(payload) ?? i18n.t('common:stream_failed'))
+    throw new ApiError(readApiErrorMessage(payload) ?? i18n.t('common:stream_failed'), response.status, payload)
   }
 
   if (!response.body) {
@@ -172,6 +191,15 @@ export async function consumeEventStream(response: Response, onEvent: (event: St
         continue
       }
       onEvent({ event, data: data as StreamEvent['data'] })
+      // v2.3: 收到 error 事件后立即停止读流；不依赖服务端主动关闭。
+      if (event === 'error') {
+        try {
+          await reader.cancel()
+        } catch {
+          // 静默
+        }
+        return
+      }
     }
   }
 }

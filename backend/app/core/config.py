@@ -63,13 +63,25 @@ class Settings(BaseSettings):
     interview_stale_reply_lock_seconds: int = 300
     max_upload_bytes: int = 5 * 1024 * 1024
 
-    # v2.2 充值档位配置（mock 支付，仅供审计）
+    # v2.2 充值档位配置
     package_single_price_cents: int = 2000   # 20元
     package_single_interviews: int = 5
     package_sub_price_cents: int = 20000      # 200元
     package_sub_duration_days: int = 30
     # 新用户默认免费面试次数（一次性）
     new_user_free_quota: int = 1
+
+    # v2.5 真实支付通道（当前仅支持 Stripe；未配置密钥时直接 503）
+    # payment_provider: stripe（默认；不可改为其它值）
+    payment_provider: str = "stripe"
+    # 前端基础 URL（用于 Stripe Checkout 的 success/cancel 回调）
+    frontend_base_url: str = "http://localhost:5173"
+    # Stripe —— 必填项：STRIPE_SECRET_KEY（无则支付入口直接报错）
+    # 可选项：STRIPE_PUBLISHABLE_KEY（用于前端 Stripe.js）、STRIPE_WEBHOOK_SECRET
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_currency: str = "cny"
 
     @property
     def database_file(self) -> Path:

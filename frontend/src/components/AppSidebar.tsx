@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Clock3, FileText, LogOut, Plus, PlusCircle } from 'lucide-react'
+import { Clock3, FileText, LogOut, Plus, PlusCircle, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router-dom'
 import { LanguageSwitcher } from '@/i18n/LanguageSwitcher'
@@ -14,31 +14,39 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ user, onLogout, onOpenBilling }: AppSidebarProps) {
-  const { t } = useTranslation('sidebar')
+  const { t, i18n } = useTranslation('sidebar')
+  const isZh = i18n.language.startsWith('zh')
   return (
-    <aside className="v2-sidebar">
-      <div className="v2-brand">
-        <span className="v2-brand-mark">AI</span>
+    <aside className="app-sidebar">
+      <div className="app-brand">
+        <span className="app-brand-mark">{isZh ? '面' : 'R'}</span>
         <div>
           <h1>{t('brand')}</h1>
           <p>{t('tagline')}</p>
         </div>
       </div>
-      <div className="v2-sidebar-lang-pill">
+      <div className="app-sidebar-lang-pill">
         <LanguageSwitcher />
       </div>
-      <Card className="v2-user-card">
+      <Card className="app-user-card">
         <CardContent className="grid gap-2 p-0">
-          <Button className="v2-user-logout" variant="ghost" size="sm" onClick={onLogout}>
+          <Button className="app-user-logout" variant="ghost" size="sm" onClick={onLogout}>
             <LogOut />
             {t('logout')}
           </Button>
           <strong>{user.username}</strong>
-          <div className="v2-user-quota-row">
-            <span>{t('quota_label', { count: user.quota_remaining })}</span>
+          <div className="app-user-quota-row">
+            {/* v2.3: quota_remaining 为 null 时显示「Unlimited」+ ⚡ */}
+            {user.quota_remaining === null ? (
+              <span className="app-user-quota-unlimited">
+                <Zap size={14} aria-hidden /> {t('unlimited')}
+              </span>
+            ) : (
+              <span>{t('quota_label', { count: user.quota_remaining })}</span>
+            )}
             <button
               type="button"
-              className="v2-recharge-btn"
+              className="app-recharge-btn"
               onClick={onOpenBilling}
               aria-label={t('recharge')}
               title={t('recharge')}
@@ -49,7 +57,7 @@ export function AppSidebar({ user, onLogout, onOpenBilling }: AppSidebarProps) {
           <Badge variant="secondary">{t(`tier_${user.tier || 'free'}`)}</Badge>
         </CardContent>
       </Card>
-      <nav className="v2-nav">
+      <nav className="app-nav">
         <NavLink to="/resumes" end>
           <FileText />
           {t('nav_resumes')}
@@ -63,7 +71,7 @@ export function AppSidebar({ user, onLogout, onOpenBilling }: AppSidebarProps) {
           {t('nav_records')}
         </NavLink>
       </nav>
-      <div className="v2-sidebar-footer" />
+      <div className="app-sidebar-footer" />
     </aside>
   )
 }

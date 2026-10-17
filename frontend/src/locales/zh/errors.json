@@ -19,7 +19,19 @@
   "INTERVIEW_BOOTSTRAP_FAILED": "面试启动失败，请重试。",
   "INTERVIEW_REPLY_FAILED": "面试官响应失败，请重试。",
   "INTERVIEW_REPLY_IN_PROGRESS": "上一条回答仍在处理中，请稍候。",
+  "INTERVIEW_REPLY_INVALID": "回答内容不合法。",
+  "INTERVIEW_LANGUAGE_INVALID": "面试语言只能是 en 或 zh。",
   "INTERVIEW_EVALUATION_FAILED": "评估生成失败，请稍后重试。",
+  "ALGORITHM_PROBLEM_NOT_FOUND": "算法题不存在。",
+  "JUDGE_CODE_INVALID": "提交的代码为空。",
+  "JUDGE_LANGUAGE_UNSUPPORTED": "暂不支持该编程语言的判题。",
+  "JUDGE_EXECUTION_FAILED": "判题服务执行失败，请稍后重试。",
+  "PAYMENT_FAILED": "支付失败，请稍后重试或联系客服。",
   "INTERNAL_ERROR": "服务器内部错误，请稍后重试。",
-  "rate_limited": "请求过于频繁，请稍后重试。"
+  "rate_limited": "请求过于频繁，请稍后重试。",
+  "field_string_too_short": "长度不足",
+  "field_string_too_long": "长度超出限制",
+  "field_value_error": "格式不合法",
+  "field_missing": "此项必填",
+  "field_": "格式不合法"
 }

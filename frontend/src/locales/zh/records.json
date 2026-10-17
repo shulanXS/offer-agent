@@ -24,5 +24,11 @@
   "page_meta": "第 {{current}} / {{total}} 页",
   "total_count": "共 {{count}} 条记录",
   "btn_prev": "上一页",
-  "btn_next": "下一页"
+  "btn_next": "下一页",
+  "placeholder_feature_1": "所有面试按时间倒序展示，按岗位/难度/状态精准筛选",
+  "placeholder_feature_2": "查看历史报告，追踪每场面试的能力得分变化",
+  "placeholder_feature_3": "一键从历史记录回到对应面试计划或评估页",
+  "score_label_short": "得分",
+  "score_empty": "暂无评分",
+  "score_aria_full": "综合分 {{score}}，满分 100"
 }

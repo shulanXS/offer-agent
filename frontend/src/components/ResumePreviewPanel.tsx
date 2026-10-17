@@ -1,4 +1,5 @@
 import type { ResumeSummary } from '../types'
+import { useTranslation } from 'react-i18next'
 
 type ResumePreviewPanelProps = {
   resume: ResumeSummary
@@ -6,21 +7,23 @@ type ResumePreviewPanelProps = {
 }
 
 export function ResumePreviewPanel({ resume, updatedAtText }: ResumePreviewPanelProps) {
+  const { t } = useTranslation('resumes')
+  const empty = t('preview_empty_text')
   return (
     <div className="resume-preview">
       <h4>{resume.filename}</h4>
       <div className="resume-preview-meta">
         <span>
-          解析模型：{resume.model_provider || '未记录'} / {resume.model_name || '默认模型'}
+          {t('preview_model_label')}：{resume.model_provider || t('preview_model_unrecorded')} / {resume.model_name || t('preview_model_default')}
         </span>
-        <span>更新时间：{updatedAtText}</span>
+        <span>{t('preview_updated_at')}：{updatedAtText}</span>
       </div>
       <section className="resume-preview-section">
-        <h5>个人摘要</h5>
-        <p>{resume.personal_info || '暂无个人信息摘要'}</p>
+        <h5>{t('preview_personal_summary')}</h5>
+        <p>{resume.personal_info || empty}</p>
       </section>
       <section className="resume-preview-section">
-        <h5>亮点标签</h5>
+        <h5>{t('preview_highlights')}</h5>
         <div className="resume-chip-list">
           {resume.highlights.length > 0 ? (
             resume.highlights.map((item) => (
@@ -29,12 +32,12 @@ export function ResumePreviewPanel({ resume, updatedAtText }: ResumePreviewPanel
               </span>
             ))
           ) : (
-            <p>暂无</p>
+            <p>{empty}</p>
           )}
         </div>
       </section>
       <section className="resume-preview-section">
-        <h5>技术技能</h5>
+        <h5>{t('preview_skills')}</h5>
         <div className="resume-chip-list">
           {resume.technical_skills.length > 0 ? (
             resume.technical_skills.map((item) => (
@@ -43,43 +46,43 @@ export function ResumePreviewPanel({ resume, updatedAtText }: ResumePreviewPanel
               </span>
             ))
           ) : (
-            <p>暂无</p>
+            <p>{empty}</p>
           )}
         </div>
       </section>
       <section className="resume-preview-section">
-        <h5>工作经历</h5>
+        <h5>{t('preview_work')}</h5>
         {resume.work_experience.length > 0 ? (
           <div className="resume-entry-list">
             {resume.work_experience.map((item, index) => (
               <article key={`${item.name}-${index}`} className="resume-entry-card">
-                <strong>{item.name || `经历 ${index + 1}`}</strong>
-                <p>{item.detail || '暂无详情'}</p>
+                <strong>{item.name || t('preview_fallback_name', { n: index + 1 })}</strong>
+                <p>{item.detail || t('preview_no_detail')}</p>
               </article>
             ))}
           </div>
         ) : (
-          <p>暂无</p>
+          <p>{empty}</p>
         )}
       </section>
       <section className="resume-preview-section">
-        <h5>项目经历</h5>
+        <h5>{t('preview_projects')}</h5>
         {resume.project_experience.length > 0 ? (
           <div className="resume-entry-list">
             {resume.project_experience.map((item, index) => (
               <article key={`${item.name}-${index}`} className="resume-entry-card">
-                <strong>{item.name || `项目 ${index + 1}`}</strong>
-                <p>{item.detail || '暂无详情'}</p>
+                <strong>{item.name || t('preview_fallback_name', { n: index + 1 })}</strong>
+                <p>{item.detail || t('preview_no_detail')}</p>
               </article>
             ))}
           </div>
         ) : (
-          <p>暂无</p>
+          <p>{empty}</p>
         )}
       </section>
       <details className="resume-raw-text">
-        <summary>查看抽取原文</summary>
-        <pre>{resume.resume_text || '暂无原文内容'}</pre>
+        <summary>{t('preview_raw_text')}</summary>
+        <pre>{resume.resume_text || empty}</pre>
       </details>
     </div>
   )

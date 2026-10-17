@@ -20,6 +20,8 @@
   "regenerate_focus_label": "Focus topics",
   "regenerate_additional_label": "Additional instructions",
   "regenerate_submit": "Regenerate",
+  "regenerate_last_attempt": "Last attempt: after this you cannot adjust further.",
+  "regenerate_remaining_hint": "After this, you can adjust {{count}} more time(s). (Remaining: {{remaining}})",
   "plan_status_draft": "Draft",
   "plan_status_confirmed": "Confirmed",
   "plan_status_superseded": "Superseded"

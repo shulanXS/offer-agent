@@ -7,8 +7,7 @@ import { useInterviewSessionList } from '@/hooks/useInterviewSessionList'
 import {
   type InterviewSessionListItem,
 } from '@/types/interviewSessionList'
-import { bcp47ForIntl } from '@/i18n/useLocale'
-import i18n from '@/i18n'
+import { bcp47ForIntl, useLocale } from '@/i18n/useLocale'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, LoaderCircle } from 'lucide-react'
 import {
   buildScoreRingPresentation,
@@ -75,8 +74,8 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
   const hasActiveFilters = Boolean(roleFilter || levelFilter || statusFilter)
 
   return (
-    <div className="v2-records-page">
-      <header className="v2-page-header v2-records-header">
+    <div className="app-records-page">
+      <header className="app-page-header app-records-header">
         <div>
           <h2>{t('records_title')}</h2>
           <p>{t('records_subtitle')}</p>
@@ -85,8 +84,8 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
       </header>
 
       {!isLoading && !error && sessions.length > 0 ? (
-        <div className="v2-records-toolbar">
-          <div className="v2-records-filters">
+        <div className="app-records-toolbar">
+          <div className="app-records-filters">
             <RecordFilterSelect
               ariaLabel={t('filter_role')}
               value={roleFilter || ALL_FILTER_VALUE}
@@ -130,30 +129,30 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
       ) : null}
 
       {isLoading ? (
-        <Card className="v2-panel v2-records-loading">
-          <LoaderCircle className="v2-eval-spinner" size={24} />
+        <Card className="app-panel app-records-loading">
+          <LoaderCircle className="app-eval-spinner" size={24} />
           <p>{t('records_loading')}</p>
         </Card>
       ) : null}
 
-      {error ? <p className="v2-error v2-records-error">{error instanceof Error ? error.message : tc('request_failed')}</p> : null}
+      {error ? <p className="app-error app-records-error">{error instanceof Error ? error.message : tc('request_failed')}</p> : null}
 
       {!isLoading && !error && sessions.length === 0 ? (
-        <Card className="v2-panel v2-records-empty">
+        <Card className="app-panel app-records-empty">
           <p>{t('empty_records')}</p>
-          <button type="button" className="v2-btn-confirm" onClick={() => navigate('/interviews/new')}>
+          <button type="button" className="app-btn-confirm" onClick={() => navigate('/interviews/new')}>
             {t('btn_create')}
           </button>
         </Card>
       ) : null}
 
       {!isLoading && !error && sessions.length > 0 && filteredSessions.length === 0 ? (
-        <Card className="v2-panel v2-records-empty">
+        <Card className="app-panel app-records-empty">
           <p>{t('empty_filtered')}</p>
           {hasActiveFilters ? (
             <button
               type="button"
-              className="v2-text-button"
+              className="app-text-button"
               onClick={() => {
                 setRoleFilter('')
                 setLevelFilter('')
@@ -168,15 +167,15 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
 
       {!isLoading && !error && filteredSessions.length > 0 ? (
         <>
-          <div className="v2-records-list">
+          <div className="app-records-list">
             {paginatedSessions.map((session) => (
               <InterviewRecordRow key={session.id} session={session} onAction={() => navigate(session.action_path)} />
             ))}
           </div>
-          <div className="v2-records-footer">
-            <p className="v2-records-footnote">{t('total_count', { count: filteredSessions.length })}</p>
+          <div className="app-records-footer">
+            <p className="app-records-footnote">{t('total_count', { count: filteredSessions.length })}</p>
             {totalPages > 1 ? (
-              <div className="v2-records-pagination">
+              <div className="app-records-pagination">
                 <Button
                   type="button"
                   variant="outline"
@@ -187,7 +186,7 @@ export function InterviewRecordsPage({ token }: InterviewRecordsPageProps) {
                   <ChevronLeft />
                   {t('btn_prev')}
                 </Button>
-                <span className="v2-records-pagination-meta">
+                <span className="app-records-pagination-meta">
                   {t('page_meta', { current: currentPage, total: totalPages })}
                 </span>
                 <Button
@@ -224,7 +223,7 @@ function RecordFilterSelect({
 }) {
   return (
     <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger className="v2-records-filter-select" aria-label={ariaLabel}>
+      <SelectTrigger className="app-records-filter-select" aria-label={ariaLabel}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -246,6 +245,7 @@ function InterviewRecordRow({
   onAction: () => void
 }) {
   const { t } = useTranslation('records')
+  const locale = useLocale()
   const roleLabel = session.target_role_label || session.target_role || '—'
   const levelKey = `level_${session.target_level}`
   const levelLabel =
@@ -256,38 +256,38 @@ function InterviewRecordRow({
   const statusLabel = t(statusKey as 'status_not_started')
 
   return (
-    <Card className="v2-panel v2-record-row-card">
-      <div className="v2-record-row">
-        <div className="v2-record-score-col">
+    <Card className="app-panel app-record-row-card">
+      <div className="app-record-row">
+        <div className="app-record-score-col">
           <RecordScoreRing presentation={scorePresentation} />
-          <span className="v2-record-score-label">得分</span>
+          <span className="app-record-score-label">{t('score_label_short')}</span>
         </div>
 
-        <div className="v2-record-title-block">
+        <div className="app-record-title-block">
           <h3>{title}</h3>
-          <div className="v2-record-info-tags">
-            <span className={`v2-record-difficulty v2-record-difficulty-${session.target_level || 'intermediate'}`}>
+          <div className="app-record-info-tags">
+            <span className={`app-record-difficulty app-record-difficulty-${session.target_level || 'intermediate'}`}>
               {levelLabel}
             </span>
-            <span className={`v2-record-status v2-record-status-${session.display_label}`}>{statusLabel}</span>
+            <span className={`app-record-status app-record-status-${session.display_label}`}>{statusLabel}</span>
           </div>
         </div>
 
         <RecordMetric
-          className="v2-record-metric-duration"
+          className="app-record-metric-duration"
           icon={<Clock3 size={18} />}
           value={t('common:minutes', { count: session.duration_minutes })}
           label={t('metric_duration')}
         />
         <RecordMetric
-          className="v2-record-metric-date"
+          className="app-record-metric-date"
           icon={<CalendarDays size={18} />}
-          value={formatDateTime(session.session_at || session.created_at)}
+          value={formatDateTime(session.session_at || session.created_at, locale)}
           label={t('metric_date')}
         />
 
-        <div className="v2-record-row-actions">
-          <button type="button" className="v2-record-outline-btn" onClick={onAction}>
+        <div className="app-record-row-actions">
+          <button type="button" className="app-record-outline-btn" onClick={onAction}>
             {session.action_label}
             <ChevronRight size={16} />
           </button>
@@ -309,42 +309,43 @@ function RecordMetric({
   className?: string
 }) {
   return (
-    <div className={`v2-record-metric${className ? ` ${className}` : ''}`}>
-      <div className="v2-record-metric-value">
+    <div className={`app-record-metric${className ? ` ${className}` : ''}`}>
+      <div className="app-record-metric-value">
         {icon}
         <strong>{value}</strong>
       </div>
-      <span className="v2-record-metric-label">{label}</span>
+      <span className="app-record-metric-label">{label}</span>
     </div>
   )
 }
 
 function RecordScoreRing({ presentation }: { presentation: ScoreRingPresentation }) {
+  const { t } = useTranslation('records')
   if (presentation.score == null) {
     return (
-      <div className="v2-record-score-ring empty" aria-label="暂无评分">
-        <span className="v2-record-score-empty">—</span>
+      <div className="app-record-score-ring empty" aria-label={t('score_empty')}>
+        <span className="app-record-score-empty">—</span>
       </div>
     )
   }
 
   return (
     <div
-      className={`v2-record-score-ring v2-record-score-ring-${presentation.tone}`}
-      aria-label={`综合分 ${presentation.score}，满分 100`}
+      className={`app-record-score-ring app-record-score-ring-${presentation.tone}`}
+      aria-label={t('score_aria_full', { score: presentation.score })}
     >
-      <svg viewBox="0 0 36 36" className="v2-record-score-svg" aria-hidden>
+      <svg viewBox="0 0 36 36" className="app-record-score-svg" aria-hidden>
         <path
-          className="v2-record-score-track"
+          className="app-record-score-track"
           d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
         />
         <path
-          className="v2-record-score-progress"
+          className="app-record-score-progress"
           strokeDasharray={`${presentation.progress}, 100`}
           d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
         />
       </svg>
-      <div className="v2-record-score-center">
+      <div className="app-record-score-center">
         <strong>{presentation.score}</strong>
         {presentation.isPartial && presentation.total > 0 ? (
           <small>{presentation.scored}/{presentation.total}</small>
@@ -387,20 +388,16 @@ function filterSessions(
   return items
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string, locale: 'zh' | 'en') {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(bcp47ForIntl(useLocaleLike()), {
+  return date.toLocaleString(bcp47ForIntl(locale), {
+    timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   })
-}
-
-function useLocaleLike() {
-  const raw = (i18n.language || 'en').split('-')[0]
-  return (raw === 'zh' ? 'zh' : 'en') as 'en' | 'zh'
 }
 
